@@ -1,0 +1,10 @@
+method: ucb
+n_partitions: 4
+noise_rates: [0.0, 0.1, 0.4, 0.8]
+k: 4
+n_test: 80
+seed: 0
+ucb_c: 2.0
+model_path: /data/pulakurthi.manohar/hf_home/Qwen2.5-3B-Instruct
+hf_cache: /data/pulakurthi.manohar/hf_home
+results_dir: /data/pulakurthi.manohar/results

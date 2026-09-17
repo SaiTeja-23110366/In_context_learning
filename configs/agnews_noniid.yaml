@@ -1,0 +1,18 @@
+run_name: noniid
+partition_mode: non_iid
+dirichlet_alpha: 0.3
+n_partitions: 4
+n_p: 2
+noise_rates: [0.0, 0.2, 0.5, 1.0]
+k: 8
+n_test: 400
+seed: 0
+ucb_c: 2.0
+methods:
+  - no_noise
+  - worst_case
+  - uniform
+  - kucb
+model_path: /data/pulakurthi.manohar/hf_home/Qwen2.5-3B-Instruct
+hf_cache: /data/pulakurthi.manohar/hf_home
+results_dir: /data/pulakurthi.manohar/results

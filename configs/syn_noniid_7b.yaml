@@ -1,0 +1,27 @@
+dataset: synthetic
+dirichlet_alpha: 0.8
+hf_cache: /data/pulakurthi.manohar/hf_home
+k: 8
+methods:
+- no_noise
+- worst_case
+- uniform
+- kucb
+model_path: /data/pulakurthi.manohar/hf_home/Qwen2.5-7B-Instruct
+n_p: 2
+n_partitions: 4
+n_test: 400
+noise_rates:
+- 0.0
+- 0.2
+- 0.5
+- 1.0
+partition_mode: non_iid
+results_dir: /data/pulakurthi.manohar/results
+run_name: syn_noniid_7b
+seed: 0
+seeds:
+- 0
+- 1
+- 2
+ucb_c: 2.0

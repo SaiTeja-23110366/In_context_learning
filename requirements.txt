@@ -1,0 +1,9 @@
+numpy
+torch
+transformers
+datasets
+accelerate
+pyyaml
+pandas
+tqdm
+huggingface_hub

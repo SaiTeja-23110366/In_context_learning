@@ -1,0 +1,26 @@
+dataset: ag_news
+hf_cache: /data/pulakurthi.manohar/hf_home
+k: 8
+max_noise: 0.8
+methods:
+- no_noise
+- worst_case
+- ucb
+model_path: /data/pulakurthi.manohar/hf_home/Llama-3.2-3B-Instruct
+n_partitions: 4
+n_test: 400
+noise_mode: random
+noise_rates:
+- 0.0
+- 0.0
+- 0.5
+- 1.0
+partition_mode: iid
+results_dir: /data/pulakurthi.manohar/results
+run_name: agnews_iid_llama3b
+seed: 0
+seeds:
+- 0
+- 1
+- 2
+ucb_c: 2.0
