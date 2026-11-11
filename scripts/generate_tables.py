@@ -84,6 +84,31 @@ def print_table(results_dir: Path, mode: str, bandit_method: str, title: str) ->
         print()
 
 
+def aggregate_from_seed_files(seed_data: list[dict]) -> dict:
+    if not seed_data:
+        return None
+    agg = {}
+    all_methods = set()
+    for s in seed_data:
+        all_methods.update(s.keys())
+    for m in all_methods:
+        accs = []
+        infeas = None
+        for s in seed_data:
+            if m in s:
+                val = s[m]
+                if isinstance(val, dict):
+                    if val.get("status") == "infeasible":
+                        infeas = val
+                    elif "accuracy" in val:
+                        accs.append(val["accuracy"] * 100)
+        if infeas is not None and not accs:
+            agg[m] = infeas
+        elif accs:
+            agg[m] = {"mean": float(np.mean(accs)), "std": float(np.std(accs)), "n_seeds": len(accs)}
+    return agg
+
+
 def print_domain_ablation_table(results_dir: Path) -> None:
     print(f"\n{'='*155}")
     print("  Table 2: Domain Contextual Bandits, Retrieval & Oracle Baselines (Banking-77)")
@@ -101,6 +126,9 @@ def print_domain_ablation_table(results_dir: Path) -> None:
     ]
     for run_name, label in settings:
         d = load_summary(results_dir, run_name)
+        if d is None:
+            seed_data = load_seed_files(results_dir, run_name)
+            d = aggregate_from_seed_files(seed_data)
         if d is None:
             # Fall back to legacy name if ablation not yet run
             fallback = "banking_domain_7b" if "4parts" in run_name else "banking_domain_8parts_7b"
@@ -132,6 +160,9 @@ def print_scaling_table(results_dir: Path, n_p: int, k: int) -> None:
         run_name = f"scale_banking_shards_n{n}_np{n_p}_k{k}"
         d = load_summary(results_dir, run_name)
         seed_data = load_seed_files(results_dir, run_name)
+        if d is None:
+            d = aggregate_from_seed_files(seed_data)
+
 
         # 1. Accuracy row
         acc_strs = []

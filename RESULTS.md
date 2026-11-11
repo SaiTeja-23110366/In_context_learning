@@ -58,23 +58,25 @@ To avoid distribution leakage and zero-shot memorization, the evaluation uses th
 ## 4. Empirical Evaluation
 
 ### Table 2: Domain Contextual Bandits, Retrieval & Oracle Baselines (Banking-77)
-*4 Operational Domains, $n_p=2, k=8$, Model: Qwen2.5-7B-Instruct*
+*4 Operational Domains, $n_p=2, k=8$, Model: Qwen2.5-7B-Instruct (Aggregated over Seeds 0, 1, 2)*
 
-| Method | Accuracy (%) | Wall-Clock Time (s) | Peak CPU Memory | Peak GPU Memory | Evaluated Arms |
-| :--- | :---: | :---: | :---: | :---: | :---: |
-| **Worst-Case** | 22.19% | 77.9s | 0.26 MB | 14,593 MB | 1 |
-| **Uniform** | 27.81% | 78.7s | 0.24 MB | 14,616 MB | 4 |
-| **`IndepUCB`** | 39.06% | 74.3s | 0.26 MB | 14,607 MB | 4 |
-| **$k$-UCB** | 44.38% | 78.4s | 0.33 MB | 14,609 MB | 6 |
-| **Neural-PG** | 53.44% | 97.8s | 0.73 MB | 14,608 MB | 4 |
-| **Clean (No-Noise)** | 65.31% | 80.2s | 0.88 MB | 14,608 MB | 1 |
-| **LinUCB** | 65.31% | 196.3s | 3.95 MB | 14,616 MB | 4 |
-| **Oracle Domain** | 82.81% | 76.4s | 0.24 MB | 14,616 MB | 4 |
-| **$k$-NN Retrieval** | **89.06%** | 87.5s | 3.95 MB | 14,653 MB | 0 |
+| Method | Mean Accuracy (%) | Std Dev (%) | Mean Runtime (s) | Peak CPU Memory | Peak GPU Memory | Evaluated Arms |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Worst-Case** | 21.56% | ±1.84% | 76.5s | 0.24 MB | 14,606 MB | 1 |
+| **Uniform** | 27.29% | ±1.95% | 76.8s | 0.23 MB | 14,613 MB | 4 |
+| **`IndepUCB`** | 33.96% | ±4.09% | 74.3s | 0.25 MB | 14,609 MB | 4 |
+| **$k$-UCB** | 37.08% | ±7.08% | 76.3s | 0.27 MB | 14,606 MB | 6 |
+| **Neural-PG** | 46.04% | ±7.96% | 95.0s | 0.43 MB | 14,609 MB | 4 |
+| **LinUCB** | 56.15% | ±9.09% | 116.2s | 3.71 MB | 14,610 MB | 4 |
+| **Clean (No-Noise)** | 62.08% | ±2.45% | 77.2s | 0.46 MB | 14,608 MB | 1 |
+| **Oracle Domain** | 67.81% | ±14.03% | 75.2s | 0.24 MB | 14,617 MB | 4 |
+| **$k$-NN Retrieval** | **75.31%** | ±14.28% | 78.3s | 3.64 MB | 14,653 MB | 0 |
 
 *Observations from Table 2:*
-- **LinUCB vs. $k$-NN & Oracle**: LinUCB achieves 65.31%, which is +20.93% above $k$-UCB. However, simple $k$-NN semantic retrieval scores **89.06%**, outperforming LinUCB by +23.75%. Oracle domain routing scores **82.81%**.
-- This indicates that when partitions are semantically structured by domain, queries benefit heavily from domain retrieval. LinUCB's gain is primarily a retrieval effect rather than noise estimation.
+- **LinUCB vs. $k$-NN Retrieval & Oracle**: Across seeds 0–2, LinUCB averages **56.15%**, which is +19.07% over $k$-UCB (37.08%). However, instance retrieval (**$k$-NN Retrieval**, **75.31%**) and domain routing (**Oracle Domain**, **67.81%**) both outperform LinUCB by +19.16% and +11.66% respectively.
+- **Statistical Significance & Overlap**: Note that LinUCB (56.15 ± 9.09%) and Neural-PG (46.04 ± 7.96%) differ by approximately one standard deviation, so their performance band overlaps in early seeds.
+- **The Domain Routing Confounder**: When partitions are structured by domain, a contextual bandit such as LinUCB or Neural-PG succeeds largely because the query context correlates with the partition domain. It routes queries to the relevant domain partition rather than purely estimating partition noise rates. Instance-level semantic retrieval ($k$-NN) bypasses partition selection altogether and achieves the highest overall accuracy despite selecting from the same noisy pool.
+
 
 ---
 
