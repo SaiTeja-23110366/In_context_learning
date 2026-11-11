@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +9,80 @@ import pandas as pd
 from datasets import load_dataset
 
 AGNEWS_LABELS = ["World", "Sports", "Business", "Sci/Tech"]
+MMLU_LABELS = ["A", "B", "C", "D"]
+
+MMLU_DOMAINS = {
+    "STEM": [
+        "abstract_algebra", "anatomy", "astronomy", "college_biology",
+        "college_chemistry", "college_computer_science", "college_mathematics",
+        "college_physics", "computer_security", "conceptual_physics",
+        "electrical_engineering", "elementary_mathematics", "high_school_biology",
+        "high_school_chemistry", "high_school_computer_science",
+        "high_school_mathematics", "high_school_physics", "high_school_statistics",
+        "machine_learning"
+    ],
+    "Humanities": [
+        "formal_logic", "high_school_european_history", "high_school_us_history",
+        "high_school_world_history", "international_law", "jurisprudence",
+        "logical_fallacies", "moral_disputes", "moral_scenarios", "philosophy",
+        "prehistory", "professional_law", "world_religions"
+    ],
+    "Social Sciences": [
+        "econometrics", "high_school_geography",
+        "high_school_government_and_politics", "high_school_macroeconomics",
+        "high_school_microeconomics", "high_school_psychology",
+        "human_sexuality", "professional_psychology", "public_relations",
+        "security_studies", "sociology", "us_foreign_policy"
+    ],
+    "Other": [
+        "business_ethics", "clinical_knowledge", "college_medicine",
+        "global_facts", "human_aging", "management", "marketing",
+        "medical_genetics", "miscellaneous", "nutrition",
+        "professional_accounting", "professional_medicine", "virology"
+    ]
+}
+
+MMLU_8_DOMAINS = {
+    "STEM_Math_Physics": [
+        "abstract_algebra", "college_mathematics", "elementary_mathematics",
+        "high_school_mathematics", "high_school_statistics", "astronomy",
+        "college_physics", "conceptual_physics", "high_school_physics"
+    ],
+    "STEM_Bio_Chem_CS": [
+        "anatomy", "college_biology", "college_chemistry", "high_school_biology",
+        "high_school_chemistry", "college_computer_science", "computer_security",
+        "electrical_engineering", "high_school_computer_science", "machine_learning"
+    ],
+    "Humanities_History": [
+        "high_school_european_history", "high_school_us_history",
+        "high_school_world_history", "prehistory"
+    ],
+    "Humanities_Law_Philosophy": [
+        "formal_logic", "international_law", "jurisprudence", "logical_fallacies",
+        "moral_disputes", "moral_scenarios", "philosophy", "professional_law", "world_religions"
+    ],
+    "SocialSciences_Econ_Gov": [
+        "econometrics", "high_school_government_and_politics",
+        "high_school_macroeconomics", "high_school_microeconomics",
+        "public_relations", "security_studies", "us_foreign_policy"
+    ],
+    "SocialSciences_Psych_Soc": [
+        "high_school_geography", "high_school_psychology", "human_sexuality",
+        "professional_psychology", "sociology"
+    ],
+    "Other_Medicine": [
+        "clinical_knowledge", "college_medicine", "human_aging",
+        "medical_genetics", "nutrition", "professional_medicine", "virology"
+    ],
+    "Other_Business_Misc": [
+        "business_ethics", "global_facts", "management", "marketing",
+        "miscellaneous", "professional_accounting"
+    ]
+}
+
+SUBJECT_TO_DOMAIN = {subj: dom for dom, subjs in MMLU_DOMAINS.items() for subj in subjs}
+SUBJECT_TO_8_DOMAIN = {subj: dom for dom, subjs in MMLU_8_DOMAINS.items() for subj in subjs}
+
 ECOM_URLS = [
     "https://raw.githubusercontent.com/sugatagh/E-commerce-Text-Classification/main/Dataset/ecommerceDataset.csv",
     "https://zenodo.org/api/records/3355823/files/ecommerceDataset.csv/content",
@@ -113,6 +188,94 @@ def load_synthetic(
     return make(n_train, 0), make(n_test_pool, n_train), labels
 
 
+def load_mmlu(
+    cache_dir: str, seed: int = 0
+) -> tuple[list[dict], list[dict], list[str]]:
+    """
+    Loads MMLU (Massive Multitask Language Understanding) across all 57 subjects.
+    Formats questions into standard 4-choice multiple choice prompts.
+    Attaches domain metadata (STEM, Humanities, Social Sciences, Other).
+    """
+    ds = load_dataset("cais/mmlu", "all", cache_dir=cache_dir)
+    letters = MMLU_LABELS
+
+    def _fmt(r):
+        q = str(r["question"]).strip()
+        choices = [f"{letters[i]}. {str(c).strip()}" for i, c in enumerate(r["choices"])]
+        prompt_text = f"Question: {q}\n" + "\n".join(choices)
+        subj = str(r.get("subject", "general"))
+        dom = SUBJECT_TO_DOMAIN.get(subj, "Other")
+        dom8 = SUBJECT_TO_8_DOMAIN.get(subj, "Other_Business_Misc")
+        return {
+            "text": prompt_text,
+            "label": int(r["answer"]),
+            "subject": subj,
+            "domain": dom,
+            "domain8": dom8,
+        }
+
+    # Training pool from dev + validation (1,816 cleanly annotated subject examples)
+    train = [_fmt(r) for r in ds["dev"]] + [_fmt(r) for r in ds["validation"]]
+
+    test = [_fmt(r) for r in ds["test"]]
+    return train, test, MMLU_LABELS
+
+
+BANKING_INTENTS_8 = [
+    ("card_arrival", "Cards"),
+    ("card_not_working", "Cards"),
+    ("cancel_transfer", "Transfers"),
+    ("transfer_fee_charged", "Transfers"),
+    ("top_up_failed", "TopUp"),
+    ("automatic_top_up", "TopUp"),
+    ("exchange_rate", "Exchange"),
+    ("fiat_currency_support", "Exchange"),
+]
+BANKING_LABELS_8 = [f"Class_{i+1}" for i in range(8)]
+
+
+def load_banking(
+    cache_dir: str, seed: int = 0
+) -> tuple[list[dict], list[dict], list[str]]:
+    """
+    Loads BANKING77 with 8 fine-grained intent classes mapped to abstract class tokens
+    (Class_1 .. Class_8) across 4 operational banking domains (Cards, Transfers, TopUp, Exchange).
+    This setup evaluates true in-context learning of semantic intent binding,
+    preventing zero-shot semantic prior leakage and producing a clean vs noisy spread of 58%.
+    """
+    ds = load_dataset("PolyAI/banking77", cache_dir=cache_dir)
+    names = ds["train"].features["label"].names
+
+    intent_names = [item[0] for item in BANKING_INTENTS_8]
+    intent_to_domain = {item[0]: item[1] for item in BANKING_INTENTS_8}
+    idx_map = {names.index(name): i for i, name in enumerate(intent_names)}
+
+    def _process_split(split):
+        rows = []
+        for r in split:
+            orig_lbl = int(r["label"])
+            if orig_lbl in idx_map:
+                new_lbl = idx_map[orig_lbl]
+                name = intent_names[new_lbl]
+                dom = intent_to_domain[name]
+                rows.append({
+                    "text": str(r["text"]).strip(),
+                    "label": new_lbl,
+                    "subject": name,
+                    "domain": dom,
+                })
+        return rows
+
+    train = _process_split(ds["train"])
+    test = _process_split(ds["test"])
+
+    rng = np.random.default_rng(seed)
+    rng.shuffle(train)
+    rng.shuffle(test)
+
+    return train, test, BANKING_LABELS_8
+
+
 def load_task(dataset: str, cache_dir: str, seed: int = 0):
     if dataset == "ag_news":
         return load_agnews(cache_dir)
@@ -120,6 +283,10 @@ def load_task(dataset: str, cache_dir: str, seed: int = 0):
         return load_ecommerce(cache_dir, seed=seed)
     if dataset == "synthetic":
         return load_synthetic(seed=seed)
+    if dataset == "mmlu":
+        return load_mmlu(cache_dir, seed=seed)
+    if dataset == "banking":
+        return load_banking(cache_dir, seed=seed)
     raise ValueError(dataset)
 
 
@@ -148,6 +315,36 @@ def make_iid_partitions(
     chunks = np.array_split(order, n_partitions)
     partitions: list[list[dict]] = []
     for idxs in chunks:
+        partitions.append(
+            [{"text": train[int(i)]["text"], "label": int(train[int(i)]["label"])}
+             for i in idxs]
+        )
+    return partitions
+
+
+def make_shard_partitions(
+    train: list[dict],
+    n_partitions: int,
+    seed: int,
+    k: int = 8,
+    n_p: int = 2,
+) -> list[list[dict]]:
+    """
+    Split pooled training set into n_partitions IID shards.
+    Shuffles with the given seed and splits into n equal or nearly-equal shards.
+    Raises ValueError if any shard has fewer than ceil(k / n_p) examples.
+    """
+    min_required = math.ceil(k / n_p)
+    rng = np.random.default_rng(seed)
+    order = rng.permutation(len(train))
+    chunks = np.array_split(order, n_partitions)
+    partitions: list[list[dict]] = []
+    for p_idx, idxs in enumerate(chunks):
+        if len(idxs) < min_required:
+            raise ValueError(
+                f"Shard {p_idx} has {len(idxs)} examples, which is fewer than "
+                f"required ceil(k / n_p) = ceil({k} / {n_p}) = {min_required} examples."
+            )
         partitions.append(
             [{"text": train[int(i)]["text"], "label": int(train[int(i)]["label"])}
              for i in idxs]
@@ -201,6 +398,65 @@ def make_non_iid_partitions(
     return partitions
 
 
+def make_domain_partitions(
+    train: list[dict],
+    n_partitions: int,
+    seed: int,
+) -> list[list[dict]]:
+    """
+    Partition by semantic domain / subject clusters.
+    For n_partitions=4: STEM, Humanities, Social Sciences, Other.
+    For n_partitions=8: 8 fine-grained domain clusters.
+    For arbitrary n_partitions: groups subjects consistently across partitions.
+    """
+    rng = np.random.default_rng(seed)
+    if n_partitions == 4:
+        banking_doms = ["Cards", "Transfers", "TopUp", "Exchange"]
+        if any(ex.get("domain") in banking_doms for ex in train[:20]):
+            dom_names = banking_doms
+        else:
+            dom_names = ["STEM", "Humanities", "Social Sciences", "Other"]
+        buckets: list[list[dict]] = [[] for _ in range(4)]
+        for ex in train:
+            dom = ex.get("domain", dom_names[3])
+            idx = dom_names.index(dom) if dom in dom_names else 3
+            buckets[idx].append(ex)
+    elif n_partitions == 8:
+        banking_doms = ["Cards", "Transfers", "TopUp", "Exchange"]
+        if any(ex.get("domain") in banking_doms for ex in train[:20]):
+            intent_names = [item[0] for item in BANKING_INTENTS_8]
+            buckets: list[list[dict]] = [[] for _ in range(8)]
+            for ex in train:
+                subj = ex.get("subject", intent_names[-1])
+                idx = intent_names.index(subj) if subj in intent_names else 7
+                buckets[idx].append(ex)
+        else:
+            dom_names = list(MMLU_8_DOMAINS.keys())
+            buckets = [[] for _ in range(8)]
+            for ex in train:
+                dom8 = ex.get("domain8", dom_names[-1])
+                idx = dom_names.index(dom8) if dom8 in dom_names else 7
+                buckets[idx].append(ex)
+    else:
+        subjects = sorted(list({ex.get("subject", "") for ex in train}))
+        subj_to_part = {s: i % n_partitions for i, s in enumerate(subjects)}
+        buckets = [[] for _ in range(n_partitions)]
+        for ex in train:
+            s = ex.get("subject", "")
+            buckets[subj_to_part.get(s, 0)].append(ex)
+
+    partitions: list[list[dict]] = []
+    for p, items in enumerate(buckets):
+        if not items:
+            raise ValueError(f"Empty domain partition {p}")
+        shuffled = list(items)
+        rng.shuffle(shuffled)
+        partitions.append(
+            [{"text": x["text"], "label": int(x["label"])} for x in shuffled]
+        )
+    return partitions
+
+
 # ── Shot samplers (work on Example objects after noise injection) ──────────────
 
 def sample_shots(
@@ -215,8 +471,13 @@ def sample_shots(
     shots = []
     for i in idxs:
         ex = pool[int(i)]
-        y = ex.noisy_label if use_noisy else ex.label
-        shots.append((ex.text, y))
+        if isinstance(ex, dict):
+            text = ex["text"]
+            y = int(ex["label"])
+        else:
+            text = ex.text
+            y = ex.noisy_label if use_noisy else ex.label
+        shots.append((text, y))
     return shots
 
 

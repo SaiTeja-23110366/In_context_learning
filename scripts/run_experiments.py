@@ -20,23 +20,37 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
+import time
+import tracemalloc
 from collections import Counter
 from pathlib import Path
 
 import numpy as np
+import torch
 import yaml
 from tqdm import tqdm
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from src.bandit import KUCB, UCB1
+from src.bandit import (
+    KUCB,
+    UCB1,
+    IndepUCB,
+    KUCBInfeasibleError,
+    LinUCB,
+    NeuralPolicyBandit,
+    TextEmbedder,
+)
 from src.data_utils import (
     load_task,
+    make_domain_partitions,
     make_iid_partitions,
     make_non_iid_partitions,
+    make_shard_partitions,
     sample_shots,
     sample_shots_from_parts,
     subsample_test,
@@ -59,11 +73,21 @@ def build_clean_partitions(train: list[dict], cfg: dict) -> list[list[dict]]:
     )
     if mode == "iid":
         return make_iid_partitions(**kwargs)
+    if mode == "shards":
+        return make_shard_partitions(
+            train=train,
+            n_partitions=cfg["n_partitions"],
+            seed=cfg["seed"],
+            k=cfg["k"],
+            n_p=int(cfg.get("n_p", 2)),
+        )
     if mode == "non_iid":
         return make_non_iid_partitions(
             **kwargs,
             dirichlet_alpha=float(cfg.get("dirichlet_alpha", 0.3)),
         )
+    if mode == "domain":
+        return make_domain_partitions(**kwargs)
     raise ValueError(f"Unknown partition_mode: {mode!r}")
 
 
@@ -79,23 +103,82 @@ def run_method(
     model,
     rng: np.random.Generator,
     label_names: list[str],
+    noise_rates: list[float] | None = None,
+    embedder: TextEmbedder | None = None,
 ) -> tuple[float, list[dict], dict]:
     k = cfg["k"]
     n_p = int(cfg.get("n_p", 2))
     ucb_c = float(cfg.get("ucb_c", 2.0))
-    worst_idx = int(np.argmax(cfg["noise_rates"]))
+    rates = noise_rates if noise_rates is not None else cfg["noise_rates"]
+    worst_idx = int(np.argmax(rates))
 
     # Flatten all clean partitions into one pool for the no_noise baseline
     clean_pool = [item for part in clean_partitions for item in part]
 
     ucb = UCB1(len(noisy_partitions), c=ucb_c) if name == "ucb" else None
-    kucb = KUCB(len(noisy_partitions), n_p, c=ucb_c) if name == "kucb" else None
+    max_superarms = int(cfg.get("max_superarms", 2_000_000))
+    kucb = (
+        KUCB(len(noisy_partitions), n_p, c=ucb_c, max_superarms=max_superarms)
+        if name == "kucb"
+        else None
+    )
+    indep_ucb = (
+        IndepUCB(len(noisy_partitions), n_p=n_p, c=ucb_c)
+        if name == "indep_ucb"
+        else None
+    )
+    dim = embedder.dim if embedder is not None else 384
+    linucb = (
+        LinUCB(
+            len(noisy_partitions),
+            n_p=n_p,
+            dim=dim,
+            alpha=float(cfg.get("linucb_alpha", 1.0)),
+        )
+        if name == "linucb"
+        else None
+    )
+    neural_pg = (
+        NeuralPolicyBandit(
+            len(noisy_partitions),
+            n_p=n_p,
+            dim=dim,
+            lr=float(cfg.get("pg_lr", 1e-3)),
+            seed=int(cfg["seed"]),
+        )
+        if name == "neural_pg"
+        else None
+    )
+
+    # knn_retrieval setup: precompute normalized embeddings for pooled noisy training data
+    pooled_noisy_examples: list = []
+    pooled_vecs = None
+    if name == "knn_retrieval":
+        assert embedder is not None, "TextEmbedder required for knn_retrieval"
+        for part in noisy_partitions:
+            pooled_noisy_examples.extend(part)
+        raw_vecs = np.stack([
+            embedder.embed(ex.text if hasattr(ex, "text") else ex["text"])
+            for ex in pooled_noisy_examples
+        ])
+        norms = np.linalg.norm(raw_vecs, axis=1, keepdims=True)
+        pooled_vecs = raw_vecs / np.maximum(norms, 1e-12)
+
+    # oracle_domain setup: map each gold class to its domain partition index
+    label_to_domain_part: dict[int, int] = {}
+    if name == "oracle_domain":
+        for p_idx, part in enumerate(noisy_partitions):
+            for item in part:
+                lbl = item.label if hasattr(item, "label") else item["label"]
+                label_to_domain_part[int(lbl)] = p_idx
 
     correct = 0
     rows = []
 
     for ex in tqdm(test, desc=name, leave=False):
         arm = -1
+        combo = None
+        vec = None
 
         if name == "no_noise":
             shots = sample_shots(clean_pool, k, rng, use_noisy=False)
@@ -117,6 +200,59 @@ def run_method(
             shots = sample_shots_from_parts(
                 [noisy_partitions[i] for i in combo], k, rng, use_noisy=True
             )
+
+        elif name == "indep_ucb":
+            arm, combo = indep_ucb.select()
+            shots = sample_shots_from_parts(
+                [noisy_partitions[i] for i in combo], k, rng, use_noisy=True
+            )
+
+        elif name == "knn_retrieval":
+            assert embedder is not None and pooled_vecs is not None
+            q_vec = embedder.embed(ex["text"])
+            q_norm = np.linalg.norm(q_vec)
+            q_vec = q_vec / max(q_norm, 1e-12)
+            sims = pooled_vecs @ q_vec
+            top_k_idxs = np.argsort(sims)[::-1][:k]
+            shots = []
+            for idx in top_k_idxs:
+                cand = pooled_noisy_examples[idx]
+                if hasattr(cand, "noisy_label"):
+                    y = cand.noisy_label
+                    t = cand.text
+                elif isinstance(cand, dict):
+                    y = cand.get("noisy_label", cand["label"])
+                    t = cand["text"]
+                else:
+                    y = getattr(cand, "noisy_label", cand.label)
+                    t = cand.text
+                shots.append((t, int(y)))
+
+        elif name == "oracle_domain":
+            gold_lbl = int(ex["label"])
+            if gold_lbl not in label_to_domain_part:
+                raise ValueError(
+                    f"oracle_domain: gold class {gold_lbl} not found in any domain partition"
+                )
+            arm = label_to_domain_part[gold_lbl]
+            combo = (arm,)
+            shots = sample_shots(noisy_partitions[arm], k, rng, use_noisy=True)
+
+        elif name == "linucb":
+            assert embedder is not None, "TextEmbedder required for LinUCB"
+            vec = embedder.embed(ex["text"])
+            arm, combo = linucb.select(vec)
+            shots = sample_shots_from_parts(
+                [noisy_partitions[i] for i in combo], k, rng, use_noisy=True
+            )
+
+        elif name == "neural_pg":
+            assert embedder is not None, "TextEmbedder required for Neural Policy Gradient"
+            vec = embedder.embed(ex["text"])
+            arm, combo = neural_pg.select(vec, explore=True)
+            shots = sample_shots_from_parts(
+                [noisy_partitions[i] for i in combo], k, rng, use_noisy=True
+            )
         else:
             raise ValueError(f"Unknown method: {name!r}")
 
@@ -127,11 +263,17 @@ def run_method(
             ucb.update(arm, reward)
         if kucb is not None:
             kucb.update(arm, reward)
+        if indep_ucb is not None and combo is not None:
+            indep_ucb.update(combo, reward)
+        if linucb is not None and combo is not None and vec is not None:
+            linucb.update(combo, vec, reward)
+        if neural_pg is not None and combo is not None:
+            neural_pg.update(combo, reward)
 
         correct += int(reward)
         row = {"pred": pred, "gold": ex["label"], "arm": arm, "reward": reward}
-        if name == "kucb":
-            row["superarm"] = list(kucb.superarms[arm])
+        if combo is not None:
+            row["superarm"] = list(combo)
         rows.append(row)
 
     acc = correct / max(len(test), 1)
@@ -148,6 +290,15 @@ def run_method(
         extra["superarms"] = [list(s) for s in kucb.superarms]
         extra["arm_counts"] = kucb.ucb.counts
         extra["arm_means"] = kucb.ucb.means
+    if indep_ucb is not None:
+        extra["arm_counts"] = indep_ucb.counts
+        extra["arm_means"] = indep_ucb.means
+    if linucb is not None:
+        extra["arm_counts"] = linucb.counts
+        extra["arm_rewards"] = linucb.rewards
+    if neural_pg is not None:
+        extra["arm_counts"] = neural_pg.counts
+        extra["arm_rewards"] = neural_pg.rewards
 
     return acc, rows, extra
 
@@ -171,6 +322,11 @@ def main() -> None:
     out_dir = Path(cfg["results_dir"])
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    embedder = None
+    if any(m in ("linucb", "neural_pg", "knn_retrieval") for m in methods):
+        print("Initializing TextEmbedder for contextual bandits and retrieval...")
+        embedder = TextEmbedder(cache_dir=cfg.get("hf_cache"))
+
     per_seed: list[dict] = []
 
     for seed in seeds:
@@ -183,38 +339,37 @@ def main() -> None:
             cfg.get("dataset", "ag_news"), cfg["hf_cache"], seed=cfg["seed"]
         )
         test = subsample_test(test, cfg["n_test"], cfg["seed"])
+        replay_test = int(cfg.get("replay_test", 1))
+        if replay_test > 1:
+            test = test * replay_test
         n_classes = len(label_names)
 
         # ── 2. Create CLEAN partitions ────────────────────────────────────
         clean_parts = build_clean_partitions(train, cfg)
 
         # ── 3. Inject noise via our standalone module (OUR ADDITION) ──────
-        #
-        # Noise rates are drawn randomly per seed (not fixed).
-        # This is the correct approach: the datasets are clean, so we
-        # simulate real-world noisy sources by assigning each partition
-        # a random noise rate q_i ~ Uniform(0, max_noise).
-        # The bandit has no knowledge of these rates — it must discover
-        # which partitions are reliable purely from rewards.
-        #
-        # At least one partition is guaranteed to be clean (q=0) so the
-        # bandit always has a reliable source to find.
         noise_mode = cfg.get("noise_mode", "fixed")
         if noise_mode == "random":
             max_noise = float(cfg.get("max_noise", 0.8))
             n_parts = len(clean_parts)
-            # Draw random noise rates for all partitions
             raw_rates = rng.uniform(0.0, max_noise, size=n_parts).tolist()
-            # Force the partition with lowest drawn rate to be exactly 0
-            # (guarantees at least one reliable source exists)
             min_idx = int(np.argmin(raw_rates))
             raw_rates[min_idx] = 0.0
             noise_rates = [round(float(q), 4) for q in raw_rates]
+        elif noise_mode == "tiers":
+            tiers = [0.0, 0.2, 0.5, 0.8]
+            n_parts = len(clean_parts)
+            base_rates = [tiers[i % len(tiers)] for i in range(n_parts)]
+            tier_rng = np.random.default_rng(cfg["seed"])
+            shuffled_indices = tier_rng.permutation(n_parts)
+            noise_rates = [round(float(base_rates[i]), 4) for i in shuffled_indices]
         else:
             # Fixed mode: use values from config as before
             noise_rates = cfg["noise_rates"]
 
-        print(f"  noise_rates (seed {cfg['seed']}): {noise_rates}")
+        cfg["noise_rates"] = noise_rates
+
+        print(f"  noise_rates (seed {cfg['seed']}): {noise_rates[:8]} ... (len={len(noise_rates)})")
 
         injector = LabelNoiseInjector(
             noise_rates=noise_rates,
@@ -228,32 +383,111 @@ def main() -> None:
             "label_names": label_names,
             "dataset": cfg.get("dataset", "ag_news"),
             "partition_mode": cfg.get("partition_mode", "iid"),
-            "noise_rates": noise_rates,      # actual rates used (random or fixed)
+            "noise_mode": noise_mode,
+            "noise_rates": noise_rates,      # actual rates used
             "k": cfg["k"],
+            "replay_test": replay_test,
             "partition_sizes": [len(p) for p in noisy_parts],
         }
 
         print(f"\n=== seed {cfg['seed']} | {cfg.get('dataset')} | "
               f"{cfg.get('partition_mode')} ===")
 
-        seed_acc: dict[str, float] = {}
+        seed_acc: dict[str, float | None] = {}
         for method in methods:
-            acc, rows, extra = run_method(
-                method, noisy_parts, noisy_parts, test,
-                cfg, tok, model, rng, label_names,
-            )
-            seed_acc[method] = acc
-            summary[method] = {
-                "accuracy": acc,
-                **{k: v for k, v in extra.items() if k != "gold_counts"},
-            }
             fname = out_dir / f"{method}_{run_name}_seed{cfg['seed']}.json"
-            with open(fname, "w", encoding="utf-8") as f:
-                json.dump(
-                    {"accuracy": acc, "n": len(test), "extra": extra, "rows": rows},
-                    f,
+
+            # Check if cached already (resumable)
+            if fname.exists():
+                try:
+                    with open(fname, "r", encoding="utf-8") as f:
+                        cached_data = json.load(f)
+                    if cached_data.get("status") == "infeasible":
+                        print(f"  {method}: infeasible (cached, C={cached_data.get('superarms')})")
+                        summary[method] = cached_data
+                        seed_acc[method] = None
+                        continue
+                    elif "accuracy" in cached_data:
+                        acc = float(cached_data["accuracy"])
+                        extra = cached_data.get("extra", {})
+                        seed_acc[method] = acc
+                        summary[method] = {
+                            "accuracy": acc,
+                            **{k: v for k, v in extra.items() if k != "gold_counts"},
+                        }
+                        print(f"  {method}: {acc * 100:.2f}% (cached)")
+                        continue
+                except Exception as e:
+                    print(f"Warning: could not load cached {fname}: {e}, recomputing...")
+
+            # Run method with timing and memory tracking
+            try:
+                tracemalloc.start()
+                if torch.cuda.is_available():
+                    torch.cuda.reset_peak_memory_stats()
+                t0 = time.perf_counter()
+
+                acc, rows, extra = run_method(
+                    method, noisy_parts, clean_parts, test,
+                    cfg, tok, model, rng, label_names,
+                    noise_rates=noise_rates,
+                    embedder=embedder,
                 )
-            print(f"  {method}: {acc * 100:.2f}%")
+
+                elapsed = time.perf_counter() - t0
+                _, peak_bytes = tracemalloc.get_traced_memory()
+                tracemalloc.stop()
+                peak_cpu_mb = round(peak_bytes / (1024 * 1024), 2)
+                peak_gpu_mb = (
+                    round(torch.cuda.max_memory_allocated() / (1024 * 1024), 2)
+                    if torch.cuda.is_available()
+                    else 0.0
+                )
+
+                # Arms calculation
+                if method == "kucb":
+                    n_arms = math.comb(len(noisy_parts), int(cfg.get("n_p", 2)))
+                elif method in ("ucb", "indep_ucb", "linucb", "neural_pg", "uniform", "oracle_domain"):
+                    n_arms = len(noisy_parts)
+                elif method in ("worst_case", "no_noise"):
+                    n_arms = 1
+                elif method == "knn_retrieval":
+                    n_arms = 0
+                else:
+                    n_arms = len(noisy_parts)
+
+                extra["wall_clock_seconds"] = round(elapsed, 2)
+                extra["peak_cpu_mb"] = peak_cpu_mb
+                extra["peak_gpu_mb"] = peak_gpu_mb
+                extra["n_arms"] = n_arms
+
+                seed_acc[method] = acc
+                summary[method] = {
+                    "accuracy": acc,
+                    **{k: v for k, v in extra.items() if k != "gold_counts"},
+                }
+                with open(fname, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {"accuracy": acc, "n": len(test), "extra": extra, "rows": rows},
+                        f,
+                    )
+                print(f"  {method}: {acc * 100:.2f}% ({elapsed:.1f}s, {peak_cpu_mb}MB CPU, {peak_gpu_mb}MB GPU)")
+
+            except KUCBInfeasibleError as err:
+                if tracemalloc.is_tracing():
+                    tracemalloc.stop()
+                print(f"  {method}: infeasible (C={err.n_superarms} > cap {err.max_superarms})")
+                infeasible_record = {
+                    "status": "infeasible",
+                    "superarms": err.n_superarms,
+                    "n_partitions": err.n_partitions,
+                    "n_p": err.n_p,
+                    "max_superarms": err.max_superarms,
+                }
+                seed_acc[method] = None
+                summary[method] = infeasible_record
+                with open(fname, "w", encoding="utf-8") as f:
+                    json.dump(infeasible_record, f, indent=2)
 
         per_seed.append(seed_acc)
         sfname = out_dir / f"summary_{run_name}_seed{cfg['seed']}.json"
@@ -263,7 +497,15 @@ def main() -> None:
     # ── Aggregate across seeds ─────────────────────────────────────────────
     agg: dict = {"seeds": list(seeds), "run_name": run_name}
     for method in methods:
-        vals = [s[method] for s in per_seed]
+        vals = [s[method] for s in per_seed if s.get(method) is not None]
+        if not vals:
+            n_superarms = math.comb(int(cfg["n_partitions"]), int(cfg.get("n_p", 2)))
+            agg[method] = {
+                "status": "infeasible",
+                "superarms": n_superarms,
+            }
+            print(f"{method}: infeasible (C={n_superarms})")
+            continue
         agg[method] = {
             "values": [round(v * 100, 4) for v in vals],
             "mean": round(float(np.mean(vals)) * 100, 2),

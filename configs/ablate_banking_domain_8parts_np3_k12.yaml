@@ -1,0 +1,46 @@
+dataset: banking
+hf_cache: /data/pulakurthi.manohar/hf_home
+model_path: /data/pulakurthi.manohar/hf_home/Qwen2.5-7B-Instruct
+results_dir: /data/pulakurthi.manohar/results
+run_name: ablate_banking_domain_8parts_np3_k12
+partition_mode: domain
+n_partitions: 8
+n_p: 3
+k: 12
+n_test: 320
+methods:
+- no_noise
+- worst_case
+- uniform
+- kucb
+- linucb
+- neural_pg
+- indep_ucb
+- knn_retrieval
+- oracle_domain
+noise_mode: random
+max_noise: 0.8
+noise_rates:
+- 0.0
+- 0.1
+- 0.2
+- 0.3
+- 0.5
+- 0.6
+- 0.7
+- 0.8
+ucb_c: 2.0
+linucb_alpha: 1.0
+pg_lr: 0.001
+seed: 0
+seeds:
+- 0
+- 1
+- 2
+- 3
+- 4
+- 5
+- 6
+- 7
+- 8
+- 9
