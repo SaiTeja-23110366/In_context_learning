@@ -58,25 +58,26 @@ To avoid distribution leakage and zero-shot memorization, the evaluation uses th
 ## 4. Empirical Evaluation
 
 ### Table 2: Domain Contextual Bandits, Retrieval & Oracle Baselines (Banking-77)
-*4 Operational Domains, $n_p=2, k=8$, Model: Qwen2.5-7B-Instruct (Aggregated over Seeds 0, 1, 2, 3, 4)*
+*4 Operational Domains, $n_p=2, k=8$, Model: Qwen2.5-7B-Instruct (Aggregated over Seeds 0, 1, 2, 3, 4, 5)*
 
 | Method | Mean Accuracy (%) | Std Dev (%) | Mean Runtime (s) | Peak CPU Memory | Peak GPU Memory | Evaluated Arms |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Worst-Case** | 20.38% | ±2.41% | 75.5s | 0.23 MB | 14,606 MB | 1 |
-| **Uniform** | 25.56% | ±2.60% | 75.8s | 0.22 MB | 14,611 MB | 4 |
-| **`IndepUCB`** | 34.69% | ±5.53% | 73.3s | 0.24 MB | 14,607 MB | 4 |
-| **$k$-UCB** | 36.38% | ±5.58% | 74.9s | 0.26 MB | 14,608 MB | 6 |
-| **Neural-PG** | 43.62% | ±8.32% | 89.8s | 0.38 MB | 14,610 MB | 4 |
-| **LinUCB** | 53.12% | ±8.93% | 99.6s | 3.66 MB | 14,610 MB | 4 |
-| **Clean (No-Noise)** | 60.62% | ±2.79% | 75.6s | 0.37 MB | 14,607 MB | 1 |
-| **Oracle Domain** | 63.19% | ±13.21% | 73.0s | 0.24 MB | 14,616 MB | 4 |
-| **$k$-NN Retrieval** | **72.81%** | ±12.66% | 74.6s | 3.58 MB | 14,653 MB | 0 |
+| **Worst-Case** | 20.52% | ±2.22% | 74.0s | 0.23 MB | 14,608 MB | 1 |
+| **Uniform** | 25.36% | ±2.42% | 74.0s | 0.22 MB | 14,612 MB | 4 |
+| **`IndepUCB`** | 34.74% | ±5.05% | 71.8s | 0.24 MB | 14,606 MB | 4 |
+| **$k$-UCB** | 35.31% | ±5.62% | 73.2s | 0.26 MB | 14,609 MB | 6 |
+| **Neural-PG** | 41.98% | ±8.44% | 87.3s | 0.36 MB | 14,610 MB | 4 |
+| **LinUCB** | 51.30% | ±9.11% | 93.8s | 3.65 MB | 14,609 MB | 4 |
+| **Clean (No-Noise)** | 61.20% | ±2.85% | 73.8s | 0.35 MB | 14,607 MB | 1 |
+| **Oracle Domain** | 61.77% | ±12.47% | 71.8s | 0.24 MB | 14,615 MB | 4 |
+| **$k$-NN Retrieval** | **70.94%** | ±12.29% | 73.0s | 3.56 MB | 14,653 MB | 0 |
 
 *Observations from Table 2:*
-- **LinUCB vs. $k$-NN Retrieval & Oracle**: Across seeds 0–4, LinUCB averages **53.12%**, which is +16.74% over $k$-UCB (36.38%). However, instance retrieval (**$k$-NN Retrieval**, **72.81%**) and domain routing (**Oracle Domain**, **63.19%**) both substantially outperform LinUCB by +19.69% and +10.07% respectively.
-- **Statistical Equivalence of `IndepUCB` and $k$-UCB**: On this domain partition, `IndepUCB` achieves **34.69 ± 5.53%**, virtually matching $k$-UCB (**36.38 ± 5.58%**). The 1.69% difference is well within one standard deviation and cannot be considered a win for either method, but `IndepUCB` eliminates combination enumeration.
-- **Statistical Overlap of LinUCB and Neural-PG**: LinUCB (53.12 ± 8.93%) and Neural-PG (43.62 ± 8.32%) remain within overlapping error bands (difference of 9.50% vs combined standard deviation).
+- **LinUCB vs. $k$-NN Retrieval & Oracle**: Across seeds 0–5, LinUCB averages **51.30%**, which is +15.99% over $k$-UCB (35.31%). However, instance retrieval (**$k$-NN Retrieval**, **70.94%**) and domain routing (**Oracle Domain**, **61.77%**) both substantially outperform LinUCB by +19.64% and +10.47% respectively.
+- **Statistical Equivalence of `IndepUCB` and $k$-UCB**: On this domain partition, `IndepUCB` achieves **34.74 ± 5.05%**, virtually matching $k$-UCB (**35.31 ± 5.62%**). The 0.57% difference is well within one standard deviation and cannot be considered a win for either method, but `IndepUCB` eliminates combination enumeration.
+- **Statistical Overlap of LinUCB and Neural-PG**: LinUCB (51.30 ± 9.11%) and Neural-PG (41.98 ± 8.44%) remain within overlapping error bands (difference of 9.32% vs combined standard deviation).
 - **The Domain Routing Confounder**: When partitions are structured by domain, a contextual bandit such as LinUCB or Neural-PG succeeds largely because the query context correlates with the partition domain. It routes queries to the relevant domain partition rather than purely estimating partition noise rates. Instance-level semantic retrieval ($k$-NN) bypasses partition selection altogether and achieves the highest overall accuracy despite selecting from the same noisy pool.
+
 
 
 
