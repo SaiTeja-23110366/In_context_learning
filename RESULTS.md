@@ -58,25 +58,26 @@ To avoid distribution leakage and zero-shot memorization, the evaluation uses th
 ## 4. Empirical Evaluation
 
 ### Table 2: Domain Contextual Bandits, Retrieval & Oracle Baselines (Banking-77)
-*4 Operational Domains, $n_p=2, k=8$, Model: Qwen2.5-7B-Instruct (Aggregated over Seeds 0, 1, 2, 3, 4, 5, 6, 7)*
+*4 Operational Domains, $n_p=2, k=8$, Model: Qwen2.5-7B-Instruct (Aggregated over Seeds 0, 1, 2, 3, 4, 5, 6, 7, 8)*
 
 | Method | Mean Accuracy (%) | Std Dev (%) | Mean Runtime (s) | Peak CPU Memory | Peak GPU Memory | Evaluated Arms |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Worst-Case** | 21.68% | ±4.61% | 72.0s | 0.23 MB | 14,608 MB | 1 |
-| **Uniform** | 25.35% | ±3.26% | 72.8s | 0.22 MB | 14,612 MB | 4 |
-| **`IndepUCB`** | 35.04% | ±5.78% | 71.1s | 0.24 MB | 14,606 MB | 4 |
-| **$k$-UCB** | 35.12% | ±5.59% | 72.2s | 0.25 MB | 14,609 MB | 6 |
-| **Neural-PG** | 41.64% | ±8.38% | 84.7s | 0.34 MB | 14,609 MB | 4 |
-| **LinUCB** | 51.91% | ±10.52% | 87.8s | 3.63 MB | 14,610 MB | 4 |
-| **Clean (No-Noise)** | 61.13% | ±2.48% | 71.5s | 0.32 MB | 14,607 MB | 1 |
-| **Oracle Domain** | 62.11% | ±12.99% | 71.3s | 0.24 MB | 14,616 MB | 4 |
-| **$k$-NN Retrieval** | **71.95%** | ±13.14% | 72.0s | 3.54 MB | 14,653 MB | 0 |
+| **Worst-Case** | 20.87% | ±4.91% | 72.3s | 0.23 MB | 14,609 MB | 1 |
+| **Uniform** | 24.79% | ±3.46% | 73.0s | 0.22 MB | 14,612 MB | 4 |
+| **`IndepUCB`** | 34.72% | ±5.53% | 71.4s | 0.24 MB | 14,606 MB | 4 |
+| **$k$-UCB** | 34.51% | ±5.54% | 72.3s | 0.25 MB | 14,608 MB | 6 |
+| **Neural-PG** | 41.22% | ±8.00% | 84.1s | 0.33 MB | 14,609 MB | 4 |
+| **LinUCB** | 51.46% | ±10.00% | 86.2s | 3.63 MB | 14,610 MB | 4 |
+| **Clean (No-Noise)** | 61.22% | ±2.35% | 71.8s | 0.31 MB | 14,608 MB | 1 |
+| **Oracle Domain** | 61.77% | ±12.28% | 71.5s | 0.24 MB | 14,616 MB | 4 |
+| **$k$-NN Retrieval** | **71.08%** | ±12.63% | 72.1s | 3.53 MB | 14,653 MB | 0 |
 
 *Observations from Table 2:*
-- **Equivalence of `IndepUCB` and $k$-UCB**: Across seeds 0–7, `IndepUCB` (**35.04 ± 5.78%**) achieves virtually identical accuracy to $k$-UCB (**35.12 ± 5.59%**), differing by a negligible 0.08%. While matching in accuracy, `IndepUCB` requires only $\mathcal{O}(n)$ computation and $n$ arm parameters, demonstrating that combinatorial superarm expansion is unnecessary even when combinations of partitions are drawn.
-- **LinUCB vs. $k$-NN Retrieval & Oracle**: LinUCB averages **51.91%**, which improves over $k$-UCB by +16.79%. However, direct instance-level semantic retrieval (**$k$-NN Retrieval**, **71.95%**) and gold domain routing (**Oracle Domain**, **62.11%**) substantially outperform LinUCB by +20.04% and +10.20% respectively.
-- **Statistical Overlap of LinUCB and Neural-PG**: LinUCB (51.91 ± 10.52%) and Neural-PG (41.64 ± 8.38%) have overlapping error bands within one standard deviation.
+- **Equivalence of `IndepUCB` and $k$-UCB**: Across seeds 0–8, `IndepUCB` (**34.72 ± 5.53%**) achieves virtually identical accuracy to $k$-UCB (**34.51 ± 5.54%**), with a difference of only 0.21% (well within one standard deviation). While matching in accuracy, `IndepUCB` requires only $\mathcal{O}(n)$ computation and $n$ arm parameters, demonstrating that combinatorial superarm expansion is unnecessary even when combinations of partitions are drawn.
+- **LinUCB vs. $k$-NN Retrieval & Oracle**: LinUCB averages **51.46%**, which improves over $k$-UCB by +16.95%. However, direct instance-level semantic retrieval (**$k$-NN Retrieval**, **71.08%**) and gold domain routing (**Oracle Domain**, **61.77%**) substantially outperform LinUCB by +19.62% and +10.31% respectively.
+- **Statistical Overlap of LinUCB and Neural-PG**: LinUCB (51.46 ± 10.00%) and Neural-PG (41.22 ± 8.00%) have overlapping error bands within one standard deviation.
 - **The Domain Routing Confounder**: When partitions are structured by domain, a contextual bandit such as LinUCB or Neural-PG succeeds largely because the query context correlates with the partition domain. It routes queries to the relevant domain partition rather than purely estimating partition noise rates. Instance-level semantic retrieval ($k$-NN) bypasses partition selection altogether and achieves the highest overall accuracy despite selecting from the same noisy pool.
+
 
 
 
