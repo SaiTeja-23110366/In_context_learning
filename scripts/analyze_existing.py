@@ -29,7 +29,7 @@ os.makedirs(PLOTS_DIR, exist_ok=True)
 # ---------------------------------------------------------
 # 1. Discover Available Runs & Seeds
 # ---------------------------------------------------------
-def discover_runs():
+def discover_runs(cap_incomplete_to_4=True):
     summary_files = glob.glob(f"{RESULTS_DIR}/summary_*_seed*.json")
     runs = defaultdict(list)
     for sf in summary_files:
@@ -40,7 +40,10 @@ def discover_runs():
             runs[rname].append(seed)
     for r in runs:
         runs[r] = sorted(runs[r])
+        if cap_incomplete_to_4 and r == "scale_banking_shards_n100_np3_k12":
+            runs[r] = [s for s in runs[r] if s < 4]
     return dict(runs)
+
 
 # ---------------------------------------------------------
 # 2. Data Loading Helper
@@ -671,6 +674,59 @@ def generate_plots(coverage_data, exposure_data, curves_data, paired_data, routi
 # ---------------------------------------------------------
 
 def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, paired_data, routing_data, leakage_stats):
+    # ---- Helper: look up a paired-difference result ----
+    def pd_lookup(run, pair):
+        return paired_data.get(run, {}).get(pair, None)
+
+    # ---- Helper: format a coverage % from coverage_data ----
+    def cov_pct(run, field):
+        d = coverage_data.get(run)
+        if d and d.get(field) is not None:
+            return f"{d[field]*100:.2f}"
+        return "N/A"
+
+    # ---- Helper: look up noise exposure mean for a method at a run ----
+    def ne_mean(run, method):
+        d = exposure_data.get(run, {}).get(method, {})
+        if d:
+            return d["mean_noise_rate"][0]
+        return None
+
+    def ne_fmt(run, method):
+        d = exposure_data.get(run, {}).get(method, {})
+        if d:
+            return f"{d['mean_noise_rate'][0]:.4f} \\pm {d['mean_noise_rate'][1]:.4f}"
+        return "N/A"
+
+    # ---- Helper: look up routing data ----
+    def rt_fmt(run, method):
+        d = routing_data.get(run, {}).get(method, {})
+        if d:
+            return f"{d['routing_acc_mean']*100:.2f} \\pm {d['routing_acc_std']*100:.2f}"
+        return "N/A"
+
+    def rt_mean(run, method):
+        d = routing_data.get(run, {}).get(method, {})
+        if d:
+            return d['routing_acc_mean']*100
+        return None
+
+    # ---- Helper: look up kNN leakage breakdown ----
+    def knn_low_acc_range():
+        bks = leakage_stats.get("breakdowns", {})
+        low_accs = [bk["low_sim_acc"][0]*100 for bk in bks.values()]
+        if low_accs:
+            return f"{min(low_accs):.2f}% to {max(low_accs):.2f}%"
+        return "N/A"
+
+    # ---- Helper: incomplete marker ----
+    INCOMPLETE_RUN = "scale_banking_shards_n100_np3_k12"
+    def incomplete_tag(rname):
+        if rname == INCOMPLETE_RUN:
+            nseeds = coverage_data.get(rname, {}).get("seeds", "?")
+            return f" *(incomplete: {nseeds} seeds)*"
+        return ""
+
     lines = []
     lines.append("# Empirical Analysis of Scaling and Domain Partition Selection in ICL\n")
     lines.append("## Overview\n")
@@ -680,6 +736,13 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
         "directly from per-seed experimental logs and verified execution traces using CPU-only analysis. "
         "No speculative language or ungrounded claims are included.\n"
     )
+    lines.append(
+        "> [!WARNING]\n"
+        f"> The configuration `{INCOMPLETE_RUN}` is marked as **incomplete ({coverage_data.get(INCOMPLETE_RUN, {}).get('seeds', '?')} seeds)** "
+        "throughout this report. All statistics for this configuration reflect the 4-seed interim evaluation and carry wider uncertainty intervals. "
+        "*(Note: background cluster execution subsequently completed all 10 seeds at 14:35).* \n"
+    )
+
 
     # ---------------------------------------------------------
     # Section 1: Coverage Analysis
@@ -697,7 +760,8 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
         k_cov = f"{d['kucb_cov_mean']*100:.2f} ± {d['kucb_cov_std']*100:.2f}" if d['kucb_cov_mean'] is not None else "N/A"
         i_part = f"{d['indep_part_cov_mean']*100:.2f} ± {d['indep_part_cov_std']*100:.2f}" if d['indep_part_cov_mean'] is not None else "N/A"
         i_combo = f"{d['indep_combo_cov_mean']*100:.2f} ± {d['indep_combo_cov_std']*100:.2f}" if d['indep_combo_cov_mean'] is not None else "N/A"
-        lines.append(f"| `{rname}` | {d['n']} | {d['np']} | {d['C']:,} | {k_cov} | {i_part} | {i_combo} | {d['seeds']} |")
+        tag = incomplete_tag(rname)
+        lines.append(f"| `{rname}`{tag} | {d['n']} | {d['np']} | {d['C']:,} | {k_cov} | {i_part} | {i_combo} | {d['seeds']} |")
     lines.append("\n![Coverage Scaling](plots/analysis/coverage_scaling.png)\n")
 
     lines.append("### Diagnostic Inspection of $k$-UCB Combinatorial Sweeping (Seed 0)\n")
@@ -710,14 +774,16 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
         lines.append(f"- **Least Frequently Selected Shards**: `{insp['bottom_10_shards_by_pulls']}`\n")
         lines.append(
             "> [!NOTE]\n"
-            f"> **Combinatorial Sweeping Mechanics**: In `kucb`, combinations are generated lexicographically via "
-            f"`itertools.combinations(range(n), n_p)`. With all arm counts initialized to 1, unpulled arms share the "
-            f"same maximal UCB upper bound. Consequently, $k$-UCB deterministically sweeps superarms in order of generation. "
-            f"Over a finite horizon of 320 queries at $n=64, n_p=3$ ($C=41,664$), all 320 pulled superarms begin with indices "
-            f"`(0, 1, x)` for $x \\in 2..63$, then `(0, 2, x)` for $x \\in 3..63$, up to `(0, 5, x)`. Consequently, shard 0 is present "
+            f"> **Index-Order Tie-Breaking in Algorithm 1**: In $k$-UCB, combinations are generated "
+            f"lexicographically via `itertools.combinations(range(n), n_p)`. With all arm counts "
+            f"initialized to 1, unpulled superarms share the same maximal UCB upper bound. Because "
+            f"the `argmax` in Algorithm 1 breaks ties by returning the first element, $k$-UCB "
+            f"deterministically sweeps superarms in index order. "
+            f"Over a finite horizon of 320 queries, this means the first superarms in lexicographic "
+            f"order are always selected first. Shard 0 is present "
             f"in **every single pulled superarm** ({insp['top_10_shards_by_pulls'][0][1]} times), while shards with higher indices "
-            f"appear only {insp['bottom_10_shards_by_pulls'][0][1]} times each as trailing elements. Shards with first index $\\ge 6$ "
-            f"are never tested in the lead position. This empirically confirms that $k$-UCB degenerates into a rigid lexicographical "
+            f"appear only {insp['bottom_10_shards_by_pulls'][0][1]} times each as trailing elements. "
+            f"This empirically confirms that $k$-UCB degenerates into a rigid index-order "
             f"sweep under large action spaces.\n"
         )
 
@@ -752,12 +818,32 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
                     lines.append(f"| `{m}` | $n={n}$ | {mr} | {t0} | {t2} | {t5} | {t8} |")
     lines.append("\n![Noise Exposure](plots/analysis/noise_exposure.png)\n")
 
+    # ---- Programmatic narrative for Sec 2 ----
     lines.append("### Findings on Noise Exposure\n")
+    # uniform at n=100
+    unif_100 = ne_fmt("scale_banking_shards_n100_np2_k8", "uniform")
+    # indep_ucb at n=16
+    iucb_16 = exposure_data.get("scale_banking_shards_n16_np2_k8", {}).get("indep_ucb", {})
+    iucb_16_mr = f"${iucb_16['mean_noise_rate'][0]:.4f} \\pm {iucb_16['mean_noise_rate'][1]:.4f}$" if iucb_16 else "N/A"
+    iucb_16_t0 = f"{iucb_16['tier_0_0'][0]*100:.1f}" if iucb_16 else "N/A"
+    iucb_16_t8 = f"{iucb_16['tier_0_8'][0]*100:.1f}" if iucb_16 else "N/A"
+    # kucb at n=32 and n=100
+    kucb_32_v = ne_mean("scale_banking_shards_n32_np2_k8", "kucb")
+    kucb_100_v = ne_mean("scale_banking_shards_n100_np2_k8", "kucb")
     lines.append(
-        "1. **Uniform Baseline**: Uniform selection strictly centers around 0.375 (e.g. at $n=100$: $0.3749 \\pm 0.0076$), with approximately 25% share per tier.\n"
-        "2. **Bandit Methods Avoidance**: Across all $n$, `indep_ucb`, `kucb`, `linucb`, and `neural_pg` systematically reduce their mean noise rate below 0.375. "
-        "For example, at $n=16, n_p=2$, `indep_ucb` achieves a mean noise rate of $0.3235 \\pm 0.0163$, shifting tier 0.0 share to $34.5\\%$ and suppressing tier 0.8 to $17.3\\%$.\n"
-        "3. **Degradation at Large $n$**: As $n$ increases to 100, `kucb` mean noise rate climbs toward 0.373 (approaching uniform), reflecting the fact that nearly all pulls are exploratory uninformative sweeps.\n"
+        f"1. **Uniform Baseline**: Uniform selection centers around 0.375 "
+        f"(e.g. at $n=100$: ${unif_100}$), with approximately 25% share per tier.\n"
+        f"2. **`indep_ucb` and `linucb` Noise Avoidance**: Across all $n$, `indep_ucb` and `linucb` "
+        f"reduce their mean noise rate below 0.375. "
+        f"For example, at $n=16, n_p=2$, `indep_ucb` achieves a mean noise rate of "
+        f"{iucb_16_mr}, shifting tier 0.0 share to ${iucb_16_t0}\\%$ and suppressing tier 0.8 to ${iucb_16_t8}\\%$.\n"
+        f"3. **`kucb` Does Not Reliably Avoid Noise**: `kucb` does not stay below 0.375 at all $n$. "
+        f"At $n=32, n_p=2$, `kucb` mean noise rate is "
+        f"**{kucb_32_v:.4f}** (above 0.375). "
+        f"At $n=100$, it is {kucb_100_v:.4f}. "
+        f"This reflects the fact that with an action space of $\\binom{{n}}{{n_p}}$ superarms and only 320 queries, "
+        f"nearly all pulls are exploratory uninformative sweeps.\n"
+        f"4. **`neural_pg`**: `neural_pg` shows only marginal noise avoidance at small $n$ and converges toward the uniform expectation as $n$ grows.\n"
     )
 
     # ---------------------------------------------------------
@@ -787,14 +873,40 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
                     lines.append(f"| `{rname}` | `{m}` | {q1} | {q2} | {q3} | {q4} | **{d_val}** |")
 
     lines.append("\n![Learning Curves](plots/analysis/learning_curves.png)\n")
+
+    # ---- Programmatic Sec 3 narrative ----
     lines.append("### Learning Curve Trajectory Assessment\n")
+    # Collect delta ranges for IID suites
+    iid_deltas = []
+    for rname in ["scale_banking_shards_n16_np2_k8", "scale_banking_shards_n64_np2_k8", "scale_banking_shards_n100_np2_k8"]:
+        for m in ["indep_ucb", "kucb", "uniform", "neural_pg"]:
+            cd = curves_data.get(rname, {}).get(m, {})
+            if cd:
+                iid_deltas.append(cd["delta_Q4_minus_Q1"][0])
+    iid_delta_min = min(iid_deltas) if iid_deltas else 0
+    iid_delta_max = max(iid_deltas) if iid_deltas else 0
+    # linucb on domain
+    dom_linucb = curves_data.get("ablate_banking_domain_4parts_np2_k8", {}).get("linucb", {})
+    dom_npg = curves_data.get("ablate_banking_domain_4parts_np2_k8", {}).get("neural_pg", {})
     lines.append(
-        "- **IID Shard Suites**: On IID shards ($n=16, 64, 100$), the trajectories are largely flat or show slight modest upward drift ($+0.01$ to $+0.04$). "
-        "Because rewards are binary (0/1 classification) and noise is moderate (0.375 average), 320 queries provide limited statistical sample efficiency "
-        "to complete the explore-exploit transition across tens or hundreds of arms.\n"
-        "- **Domain Suites**: On `ablate_banking_domain_4parts_np2_k8`, `linucb` demonstrates a clear upward learning curve from $0.6275 \\pm 0.0535$ in Q1 "
-        "to $0.6863 \\pm 0.0468$ in Q4 ($\\Delta = +0.0588$), confirming active policy refinement when context correlates with partition content.\n"
+        f"- **IID Shard Suites**: On IID shards ($n=16, 64, 100$), the trajectories are largely flat "
+        f"(non-contextual bandit $\\Delta = Q4 - Q1$ ranges from ${iid_delta_min:+.4f}$ to ${iid_delta_max:+.4f}$). "
+        f"Because rewards are binary (0/1 classification) and noise is moderate (0.375 average), 320 queries provide limited statistical sample efficiency "
+        f"to complete the explore-exploit transition across tens or hundreds of arms.\n"
     )
+    if dom_linucb:
+        lines.append(
+            f"- **Domain Suites**: On `ablate_banking_domain_4parts_np2_k8`, `linucb` shows "
+            f"Q1 = ${dom_linucb['Q1'][0]:.4f} \\pm {dom_linucb['Q1'][1]:.4f}$ rising to "
+            f"Q4 = ${dom_linucb['Q4'][0]:.4f} \\pm {dom_linucb['Q4'][1]:.4f}$ "
+            f"($\\Delta = {dom_linucb['delta_Q4_minus_Q1'][0]:+.4f}$). "
+        )
+    if dom_npg:
+        lines.append(
+            f"`neural_pg` rises from Q1 = ${dom_npg['Q1'][0]:.4f}$ to Q4 = ${dom_npg['Q4'][0]:.4f}$ "
+            f"($\\Delta = {dom_npg['delta_Q4_minus_Q1'][0]:+.4f}$), confirming active policy refinement when "
+            f"context correlates with partition content.\n"
+        )
 
     # ---------------------------------------------------------
     # Section 4: Paired Statistical Differences
@@ -807,10 +919,11 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
     )
 
     lines.append("### Table 4.1: Paired Statistical Tests Across Configurations")
-    lines.append("| Configuration | Comparison ($A - B$) | Mean Diff ($\\bar{d}$) | Std Dev ($s_d$) | 95% CI | $p$-value | Significance |")
-    lines.append("|---|---|---|---|---|---|---|")
+    lines.append("| Configuration | Comparison ($A - B$) | Mean Diff ($\\bar{d}$) | Std Dev ($s_d$) | 95% CI | $p$-value | Significance | Seeds |")
+    lines.append("|---|---|---|---|---|---|---|---|")
 
     for rname, comps in sorted(paired_data.items()):
+        tag = incomplete_tag(rname)
         for comp_name in ["indep_ucb - kucb", "linucb - indep_ucb", "indep_ucb - uniform"]:
             if comp_name in comps:
                 st = comps[comp_name]
@@ -819,7 +932,7 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
                 ci = f"[{st['ci_95'][0]:+.4f}, {st['ci_95'][1]:+.4f}]"
                 pv = f"{st['p_value']:.4e}" if st['p_value'] < 1e-3 else f"{st['p_value']:.4f}"
                 sig_text = f"**{st['sig_label']}**" if st['significant'] else "not significant"
-                lines.append(f"| `{rname}` | `{comp_name}` | {md} | {sd} | {ci} | {pv} | {sig_text} |")
+                lines.append(f"| `{rname}`{tag} | `{comp_name}` | {md} | {sd} | {ci} | {pv} | {sig_text} | {st['n_seeds']} |")
 
     lines.append("\n![Paired Differences](plots/analysis/paired_differences.png)\n")
 
@@ -829,32 +942,66 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
     lines.append("## 5. Domain Routing Check\n")
     lines.append(
         "On domain suites, each partition contains a disjoint subset of classes. A query is 'correctly routed' "
-        "if the selected partition(s) contain the true gold class of the query.\n"
-        "- **4 Domains**: Class $y \\in \\{0..7\\} \\implies$ Domain $y // 2$ (Card, Transfer, TopUp, Exchange). Uniform chance = 25%.\n"
-        "- **8 Intents**: Class $y \\in \\{0..7\\} \\implies$ Partition $y$. Uniform chance = 12.5%.\n"
+        "if **at least one** of the selected partition(s) contains the true gold class of the query.\n\n"
+        "The chance level depends on **how many partitions the method selects**:\n"
+        "- `uniform` and `worst_case` select **1** partition per query.\n"
+        "  - 4 Domains: chance = $1/4 = 25.0\\%$\n"
+        "  - 8 Intents: chance = $1/8 = 12.5\\%$\n"
+        "- `kucb`, `indep_ucb`, `neural_pg`, and `linucb` select **$n_p$** partitions per query.\n"
+        "  - 4 Domains ($n_p=2$): chance = $2/4 = 50.0\\%$\n"
+        "  - 8 Intents ($n_p=3$): chance = $3/8 = 37.5\\%$\n"
+        "- `oracle_domain` always selects the correct partition: 100%.\n\n"
+        "**Class-to-partition mapping**:\n"
+        "- **4 Domains**: Class $y \\in \\{0..7\\} \\implies$ Domain $y // 2$ (Card, Transfer, TopUp, Exchange).\n"
+        "- **8 Intents**: Class $y \\in \\{0..7\\} \\implies$ Partition $y$.\n"
     )
 
     lines.append("### Table 5.1: Gold Partition Routing Frequency (%)")
-    lines.append("| Method | 4 Domains ($n_p=2$) Routing (%) | 8 Intents ($n_p=3$) Routing (%) |")
-    lines.append("|---|---|---|")
+    lines.append("| Method | 4 Domains ($n_p=2$) Routing (%) | Chance (%) | 8 Intents ($n_p=3$) Routing (%) | Chance (%) |")
+    lines.append("|---|---|---|---|---|")
+
+    chance_map = {
+        "oracle_domain": (100.0, 100.0),
+        "linucb": (50.0, 37.5),
+        "neural_pg": (50.0, 37.5),
+        "indep_ucb": (50.0, 37.5),
+        "kucb": (50.0, 37.5),
+        "uniform": (25.0, 12.5),
+    }
 
     for m in ["oracle_domain", "linucb", "neural_pg", "indep_ucb", "kucb", "uniform"]:
         r4 = routing_data.get("ablate_banking_domain_4parts_np2_k8", {}).get(m, {})
         r8 = routing_data.get("ablate_banking_domain_8parts_np3_k12", {}).get(m, {})
         s4 = f"{r4.get('routing_acc_mean', 0.0)*100:.2f} ± {r4.get('routing_acc_std', 0.0)*100:.2f}%" if r4 else "N/A"
         s8 = f"{r8.get('routing_acc_mean', 0.0)*100:.2f} ± {r8.get('routing_acc_std', 0.0)*100:.2f}%" if r8 else "N/A"
-        lines.append(f"| `{m}` | {s4} | {s8} |")
+        c4, c8 = chance_map.get(m, (0, 0))
+        lines.append(f"| `{m}` | {s4} | {c4:.1f} | {s8} | {c8:.1f} |")
 
     lines.append("\n![Domain Routing](plots/analysis/domain_routing.png)\n")
+
+    # Programmatic routing interpretation
+    linucb_4d = rt_mean("ablate_banking_domain_4parts_np2_k8", "linucb")
+    linucb_8i = rt_mean("ablate_banking_domain_8parts_np3_k12", "linucb")
+    unif_4d = rt_mean("ablate_banking_domain_4parts_np2_k8", "uniform")
+    unif_8i = rt_mean("ablate_banking_domain_8parts_np3_k12", "uniform")
+    iucb_4d = rt_mean("ablate_banking_domain_4parts_np2_k8", "indep_ucb")
+    iucb_8i = rt_mean("ablate_banking_domain_8parts_np3_k12", "indep_ucb")
+    npg_4d = rt_mean("ablate_banking_domain_4parts_np2_k8", "neural_pg")
+    npg_8i = rt_mean("ablate_banking_domain_8parts_np3_k12", "neural_pg")
     lines.append(
         "> [!IMPORTANT]\n"
-        "> **Routing Mechanism**: LinUCB achieves **82.06 ± 6.67%** gold partition selection on 4 domains and **72.94 ± 7.60%** on 8 intents, "
-        "> compared to **26.09 ± 1.64%** and **12.88 ± 1.73%** for uniform baseline (which match theoretical uniform expectations of 25.0% and 12.5%). "
-        "> This confirms that LinUCB's high performance on domain suites is heavily driven by context-based routing to the partition "
-        "> holding the query's target class, rather than pure noise filtering.\n"
+        f"> **Routing Interpretation**: Methods selecting $n_p$ partitions have chance baselines of "
+        f"50.0% (4 domains) and 37.5% (8 intents). Against these baselines:\n"
+        f"> - `linucb` routes at **{linucb_4d:.2f}%** / **{linucb_8i:.2f}%**, far above chance.\n"
+        f"> - `neural_pg` routes at **{npg_4d:.2f}%** / **{npg_8i:.2f}%**, above chance.\n"
+        f"> - `indep_ucb` routes at **{iucb_4d:.2f}%** / **{iucb_8i:.2f}%**, close to or just below chance (expected: no context signal).\n"
+        f"> - `uniform` (1 partition) routes at **{unif_4d:.2f}%** / **{unif_8i:.2f}%**, matching its chance baselines of 25.0% / 12.5%.\n"
+        f">\n"
+        f"> LinUCB's superior accuracy on domain suites is driven by context-based routing to the partition "
+        f"holding the query's target class, not by noise filtering alone.\n"
         ">\n"
         "> *Note on IID Shards*: In the IID shards suites, training examples are randomly partitioned across shards irrespective of class label. "
-        "> All shards contain IID mixtures of all 8 classes; consequently, domain routing does not exist for IID shards.\n"
+        "> All shards contain IID mixtures of all 8 classes; consequently, domain routing does not apply.\n"
     )
 
 
@@ -866,14 +1013,17 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
         "Using `sentence-transformers/all-MiniLM-L6-v2` on CPU, all 320 test queries were compared against the 1,104 "
         "training examples of the 8-class subset.\n"
     )
-    lines.append(f"- **Total Test Queries**: {leakage_stats['total_test']}")
-    lines.append(f"- **Exact String Matches**: {leakage_stats['exact_matches']} (0.0%)")
-    lines.append(f"- **Near-Duplicate Queries (Cosine Similarity > 0.95)**: **{leakage_stats['high_sim_count']}** ({leakage_stats['high_sim_count']/leakage_stats['total_test']*100:.2f}%)")
-    lines.append(f"- **Non-Duplicate Queries (Cosine Similarity $\\le$ 0.95)**: **{leakage_stats['low_sim_count']}** ({leakage_stats['low_sim_count']/leakage_stats['total_test']*100:.2f}%)")
+    n_high = leakage_stats['high_sim_count']
+    n_low = leakage_stats['low_sim_count']
+    n_test = leakage_stats['total_test']
+    lines.append(f"- **Total Test Queries**: {n_test}")
+    lines.append(f"- **Exact String Matches**: {leakage_stats['exact_matches']} ({leakage_stats['exact_matches']/n_test*100:.1f}%)")
+    lines.append(f"- **Near-Duplicate Queries (Cosine Similarity > 0.95)**: **{n_high}** ({n_high/n_test*100:.2f}%)")
+    lines.append(f"- **Non-Duplicate Queries (Cosine Similarity $\\le$ 0.95)**: **{n_low}** ({n_low/n_test*100:.2f}%)")
     lines.append(f"- **Cosine Similarity Distribution**: Min = {leakage_stats['max_sim_min']:.4f}, Mean = {leakage_stats['max_sim_mean']:.4f}, Median = {leakage_stats['max_sim_median']:.4f}, Max = {leakage_stats['max_sim_max']:.4f}\n")
 
     lines.append("### Table 6.1: $k$-NN Retrieval Accuracy by Similarity Stratum")
-    lines.append("| Configuration | Overall Accuracy | Queries with Sim > 0.95 ($N=90$) | Queries with Sim $\\le$ 0.95 ($N=230$) | Difference |")
+    lines.append(f"| Configuration | Overall Accuracy | Queries with Sim > 0.95 ($N={n_high}$) | Queries with Sim $\\le$ 0.95 ($N={n_low}$) | Difference |")
     lines.append("|---|---|---|---|---|")
 
     for suite, bk in leakage_stats.get("breakdowns", {}).items():
@@ -884,48 +1034,149 @@ def write_report(coverage_data, kucb_inspections, exposure_data, curves_data, pa
         lines.append(f"| `{suite}` | {o} | {h} | {l} | **{diff}** |")
 
     lines.append("\n![k-NN Leakage](plots/analysis/knn_leakage_dist.png)\n")
+
+    # Programmatic leakage conclusion
+    low_acc_range = knn_low_acc_range()
     lines.append(
-        "**Leakage Conclusion**: While 28.1% of test queries have close paraphrase neighbors (cosine > 0.95) in the training pool, "
-        "$k$-NN retrieval maintains high accuracy (>80%) even on queries strictly below 0.95 similarity (e.g. 81.3% vs 86.8% at $n=16$). "
-        "Thus, $k$-NN's strong performance is not solely an artifact of exact data leakage, but reflects the efficacy of dense semantic retrieval "
-        "in locating label-consistent in-context demonstrations.\n"
+        f"**Leakage Conclusion**: While {n_high/n_test*100:.1f}% of test queries have close paraphrase neighbors (cosine > 0.95) in the training pool, "
+        f"$k$-NN retrieval achieves **{low_acc_range}** accuracy on the {n_low} test queries with cosine $\\le 0.95$. "
+        f"No exact string duplicates exist ({leakage_stats['exact_matches']}/{n_test}). "
+        f"Thus, $k$-NN's strong performance is not solely an artifact of data leakage, but reflects the efficacy of dense semantic retrieval "
+        f"in locating label-consistent in-context demonstrations.\n"
     )
 
     # ---------------------------------------------------------
     # Section 7: Safe Claims vs Claims NOT Supported
     # ---------------------------------------------------------
     lines.append("## 7. Synthesis: Safe Claims vs. Claims NOT Supported\n")
+
+    # ---- Gather all numbers programmatically ----
+    # Coverage
+    cov_n8_np2 = coverage_data.get("scale_banking_shards_n8_np2_k8", {})
+    cov_n100_np2 = coverage_data.get("scale_banking_shards_n100_np2_k8", {})
+    cov_n100_np3 = coverage_data.get("scale_banking_shards_n100_np3_k12", {})
+    kucb_n8_np2_pct = f"{cov_n8_np2.get('kucb_cov_mean', 0)*100:.2f}" if cov_n8_np2 else "N/A"
+    kucb_n100_np2_pct = f"{cov_n100_np2.get('kucb_cov_mean', 0)*100:.2f}" if cov_n100_np2 else "N/A"
+    kucb_n100_np3_pct = f"{cov_n100_np3.get('kucb_cov_mean', 0)*100:.2f}" if cov_n100_np3 else "N/A"
+
+    # Paired diffs: indep_ucb - kucb
+    sig_pairs_ik = []
+    nsig_pairs_ik = []
+    for rname in sorted(paired_data.keys()):
+        p = pd_lookup(rname, "indep_ucb - kucb")
+        if p:
+            entry = f"$n={coverage_data.get(rname, {}).get('n', '?')}, n_p={coverage_data.get(rname, {}).get('np', '?')}$: diff $= {p['mean_diff']:+.4f}$, $p = {p['p_value']:.4f}$"
+            if p["significant"]:
+                sig_pairs_ik.append(entry)
+            else:
+                nsig_pairs_ik.append(entry + f", 95% CI $[{p['ci_95'][0]:+.4f}, {p['ci_95'][1]:+.4f}]${incomplete_tag(rname)}")
+
+    # Paired diffs: linucb - indep_ucb for np=2
+    linucb_indep_np2_sig = []
+    linucb_indep_np2_nsig = []
+    for n in [8, 16, 32, 64, 100]:
+        rname = f"scale_banking_shards_n{n}_np2_k8"
+        p = pd_lookup(rname, "linucb - indep_ucb")
+        if p:
+            if p["significant"]:
+                linucb_indep_np2_sig.append(f"$n={n}$: ${p['mean_diff']:+.4f}$, $p={p['p_value']:.4e}$")
+            else:
+                linucb_indep_np2_nsig.append(f"$n={n}$: ${p['mean_diff']:+.4f}$, $p={p['p_value']:.4f}$, 95% CI $[{p['ci_95'][0]:+.4f}, {p['ci_95'][1]:+.4f}]$")
+
+    # indep_ucb - uniform significance count
+    iu_sig_count = 0
+    iu_total_count = 0
+    for rname in sorted(paired_data.keys()):
+        if not (rname.startswith("scale_") or rname.startswith("ablate_")):
+            continue
+        p = pd_lookup(rname, "indep_ucb - uniform")
+        if p:
+            iu_total_count += 1
+            if p["significant"]:
+                iu_sig_count += 1
+
+    # Noise exposure for indep_ucb across n
+    iucb_noise_parts = []
+    for n in [8, 16, 32, 64, 100]:
+        v = ne_mean(f"scale_banking_shards_n{n}_np2_k8", "indep_ucb")
+        if v is not None:
+            iucb_noise_parts.append(f"${v:.4f}$ ($n={n}$)")
+
+    # linucb noise at n=100
+    linucb_noise_100 = exposure_data.get("scale_banking_shards_n100_np2_k8", {}).get("linucb", {})
+
     lines.append("### Safe Claims (Strictly Supported by the Data)\n")
     lines.append(
-        "1. **$k$-UCB Combinatorial Coverage Collapse**: As $n$ increases from 8 to 100, $k$-UCB superarm coverage drops monotonically "
-        "from 100.0% ($n=8, n_p=2$, pulling all 28 superarms) to **6.45%** ($n=100, n_p=2$, pulling 319 out of 4,950 superarms) "
-        "and **0.20%** ($n=100, n_p=3$, pulling 320 out of 161,700 superarms). At $n=64, n_p=3$, shard 0 appears in **100% of all pulls** "
-        "(320 times) due to lexicographical generation order, while shards with higher indices appear as few as 5 times.\n"
-        "2. **Computational Overhead of $k$-UCB**: Scoring 161,700 superarms per step at $n=100, n_p=3$ slows step throughput to **3.88 it/s**, "
-        "compared to **8.90 it/s** for `IndepUCB` (which scores only 100 arms), verifying that superarm enumeration imposes significant execution cost.\n"
-        "3. **`IndepUCB` Matches or Exceeds $k$-UCB with $O(n)$ Complexity**: Across all tested configurations, `IndepUCB` either significantly "
-        "outperforms $k$-UCB (e.g. at $n=16, n_p=2$: difference $+0.0275$, $p=0.029$; at $n=32, n_p=2$: $+0.0675$, $p=0.0059$; at $n=16, n_p=3$: $+0.0775$, $p=0.0014$) "
-        "or matches it within statistical equivalence (e.g. at $n=100, n_p=2$: difference $+0.0016$, 95% CI $[-0.0378, +0.0410]$, $p=0.9305$, not significant; "
-        "at $n=100, n_p=3$: difference $-0.0104$, 95% CI $[-0.2211, +0.2002]$, $p=0.8512$, not significant). It requires only $O(n)$ computations per query.\n"
-        "4. **LinUCB Confounding in Domain Partitions**: On domain suites, LinUCB selects the partition containing the query's gold class in **82.06 ± 6.67%** of queries "
-        "(4 domains) and **72.94 ± 7.60%** (8 intents), compared to 26.09% and 12.88% for uniform baseline. This confirms that LinUCB's high domain accuracy (65.31%) "
-        "is driven primarily by context routing to the partition holding the query's target class, rather than pure noise filtering.\n"
-        "5. **Noise Avoidance on IID Shards**: `IndepUCB` consistently avoids noisy shards relative to uniform expectation (0.375), reducing mean selected noise "
-        "to $0.2732$ ($n=8$), $0.3077$ ($n=16$), $0.3141$ ($n=32$), $0.3445$ ($n=64$), and $0.3481$ ($n=100$), with statistically significant accuracy gains over uniform "
-        "in 8 of 10 scaling configurations.\n"
+        f"1. **$k$-UCB Combinatorial Coverage Collapse**: As $n$ increases from 8 to 100, $k$-UCB superarm coverage drops monotonically "
+        f"from {kucb_n8_np2_pct}% ($n=8, n_p=2$, $C = {cov_n8_np2.get('C', '?'):,}$ superarms) to "
+        f"**{kucb_n100_np2_pct}%** ($n=100, n_p=2$, $C = {cov_n100_np2.get('C', '?'):,}$ superarms) "
+        f"and **{kucb_n100_np3_pct}%** ($n=100, n_p=3${incomplete_tag(INCOMPLETE_RUN)}, $C = {cov_n100_np3.get('C', '?'):,}$ superarms). "
+        f"This sweep follows from index-order tie-breaking in Algorithm 1 (see Section 1).\n"
+        f"2. **Computational Overhead of $k$-UCB**: Scoring {cov_n100_np3.get('C', '?'):,} superarms per step at $n=100, n_p=3$ slows step throughput to **3.88 it/s**, "
+        f"compared to **8.90 it/s** for `IndepUCB` (which scores only 100 arms), verifying that superarm enumeration imposes significant execution cost.\n"
+    )
+    lines.append(
+        f"3. **No significant difference between `IndepUCB` and $k$-UCB, or `IndepUCB` significantly better, "
+        f"with $O(n)$ complexity**: Across all tested configurations, `IndepUCB` is either significantly better than $k$-UCB "
+        f"(e.g. {'; '.join(sig_pairs_ik[:3])}) "
+        f"or shows no significant difference (e.g. {'; '.join(nsig_pairs_ik[:2])}). "
+        f"It requires only $O(n)$ computations per query.\n"
+    )
+    lines.append(
+        f"4. **LinUCB Routes to Gold-Class Partitions on Domain Suites**: On domain suites, LinUCB selects "
+        f"the partition containing the query's gold class in **${rt_fmt('ablate_banking_domain_4parts_np2_k8', 'linucb')}\\%$** of queries "
+        f"(4 domains, chance = 50.0% for $n_p=2$) and **${rt_fmt('ablate_banking_domain_8parts_np3_k12', 'linucb')}\\%$** "
+        f"(8 intents, chance = 37.5% for $n_p=3$). This demonstrates context-based routing rather than pure noise filtering.\n"
+    )
+    lines.append(
+        f"5. **`IndepUCB` Noise Avoidance on IID Shards**: `IndepUCB` avoids noisy shards relative to uniform expectation (0.375), reducing mean selected noise "
+        f"to {', '.join(iucb_noise_parts)}, with statistically significant accuracy gains over uniform "
+        f"in {iu_sig_count} of {iu_total_count} tested configurations.\n"
     )
 
     lines.append("### Claims NOT Supported (Refuted or Lacking Evidence)\n")
+    # Claim 1: convergence within 320 queries
     lines.append(
-        "1. **Claim: 'Non-contextual bandits actively identify and converge to clean shards on IID scaling within 320 queries'**: "
-        "**NOT SUPPORTED**. Quarterly learning curves are largely flat (average $\\Delta = Q4 - Q1$ between $-0.0125$ and $+0.0250$ for `indep_ucb` and $k$-UCB). "
-        "With binary rewards and only 320 queries across 100 shards, statistical noise prevents online UCB algorithms from completing the explore-exploit transition over this horizon.\n"
-        "2. **Claim: 'LinUCB's advantage over non-contextual bandits disappears entirely on IID partitioned data'**: "
-        "**NOT SUPPORTED**. For $n_p=2$, LinUCB significantly outperforms `IndepUCB` across all shard counts ($n=8$ to $n=100$, differences $+0.0400$ to $+0.1869$, all $p < 0.005$). "
-        "LinUCB achieves lower mean noise exposure (e.g. 0.2351 at $n=100$, allocating 41.7% of pulls to Tier 0.0 vs 27.2% for `IndepUCB`) because its linear feature regression correlates query embeddings with shard reward statistics.\n"
-        "3. **Claim: '$k$-NN retrieval success is caused entirely by test-train exact duplicate leakage'**: "
-        "**NOT SUPPORTED**. Exact string matching found **0 exact duplicates** out of 320 test queries. While 28.1% of test queries have a near neighbor with cosine similarity > 0.95, "
-        "$k$-NN retrieval achieves **80.74% to 82.74% accuracy** on the 230 test queries with cosine $\\le 0.95$, confirming that dense semantic retrieval remains effective without near-exact duplicates.\n"
+        f"1. **Claim: 'Non-contextual bandits actively identify and converge to clean shards on IID scaling within 320 queries'**: "
+        f"**NOT SUPPORTED**. Quarterly learning curves are largely flat "
+        f"($\\Delta = Q4 - Q1$ for non-contextual methods ranges from ${iid_delta_min:+.4f}$ to ${iid_delta_max:+.4f}$). "
+        f"With binary rewards and only 320 queries across up to 100 shards, statistical noise prevents online UCB algorithms from completing the explore-exploit transition over this horizon.\n"
+    )
+    # Claim 2: LinUCB advantage disappears on IID
+    if linucb_indep_np2_sig:
+        sig_examples = "; ".join(linucb_indep_np2_sig[:3])
+        lines.append(
+            f"2. **Claim: 'LinUCB's advantage over non-contextual bandits disappears entirely on IID partitioned data'**: "
+            f"**NOT SUPPORTED**. For $n_p=2$, LinUCB significantly outperforms `IndepUCB` across all tested shard counts "
+            f"({sig_examples}). "
+        )
+    else:
+        lines.append(
+            f"2. **Claim: 'LinUCB's advantage over non-contextual bandits disappears entirely on IID partitioned data'**: "
+            f"**NOT SUPPORTED (or INCONCLUSIVE)**. "
+        )
+    if linucb_noise_100:
+        lines.append(
+            f"LinUCB achieves lower mean noise exposure "
+            f"(e.g. ${linucb_noise_100['mean_noise_rate'][0]:.4f}$ at $n=100$, allocating "
+            f"${linucb_noise_100['tier_0_0'][0]*100:.1f}\\%$ of pulls to Tier 0.0 vs "
+        )
+        iucb_100 = exposure_data.get("scale_banking_shards_n100_np2_k8", {}).get("indep_ucb", {})
+        if iucb_100:
+            lines.append(
+                f"${iucb_100['tier_0_0'][0]*100:.1f}\\%$ for `IndepUCB`). "
+            )
+    lines.append(
+        f"However, the mechanism by which LinUCB achieves this advantage on IID shards was not measured in these experiments; "
+        f"it may involve correlating query embeddings with per-shard reward statistics, but this was not directly tested.\n"
+    )
+    # Claim 3: k-NN leakage
+    lines.append(
+        f"3. **Claim: '$k$-NN retrieval success is caused entirely by test-train exact duplicate leakage'**: "
+        f"**NOT SUPPORTED**. Exact string matching found **{leakage_stats['exact_matches']} exact duplicates** out of {n_test} test queries. "
+        f"While {n_high/n_test*100:.1f}% of test queries have a near neighbor with cosine similarity > 0.95, "
+        f"$k$-NN retrieval achieves **{low_acc_range}** accuracy on the {n_low} test queries with cosine $\\le 0.95$, "
+        f"confirming that dense semantic retrieval remains effective without near-exact duplicates.\n"
     )
 
 

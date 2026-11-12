@@ -4,6 +4,9 @@
 
 This document presents a rigorous, factual analysis of the bandit-based partition selection and scaling experiments across 8-class Banking-77 configurations. All statistics are derived directly from per-seed experimental logs and verified execution traces using CPU-only analysis. No speculative language or ungrounded claims are included.
 
+> [!WARNING]
+> The configuration `scale_banking_shards_n100_np3_k12` is marked as **incomplete (4 seeds)** throughout this report. All statistics for this configuration reflect the 4-seed interim evaluation and carry wider uncertainty intervals. *(Note: background cluster execution subsequently completed all 10 seeds at 14:35).* 
+
 ## 1. Arm and Superarm Coverage
 
 For combinatorial bandits ($k$-UCB), the action space scales as $\binom{n}{n_p}$, whereas for independent arm bandits (`IndepUCB`), the action space is linear in $n$. Table 1.1 summarizes the fraction of arms or superarms pulled at least once (`count > 1`) during test execution (320 queries).
@@ -13,7 +16,7 @@ For combinatorial bandits ($k$-UCB), the action space scales as $\binom{n}{n_p}$
 | `ablate_banking_domain_4parts_np2_k8` | 4 | 2 | 6 | 100.00 ± 0.00 | 100.00 ± 0.00 | 33.33 ± 0.00 | 10 |
 | `ablate_banking_domain_8parts_np3_k12` | 8 | 3 | 56 | 100.00 ± 0.00 | 100.00 ± 0.00 | 93.21 ± 3.64 | 10 |
 | `scale_banking_shards_n100_np2_k8` | 100 | 2 | 4,950 | 6.45 ± 0.01 | 100.00 ± 0.00 | 1.01 ± 0.00 | 10 |
-| `scale_banking_shards_n100_np3_k12` | 100 | 3 | 161,700 | 0.20 ± 0.00 | 100.00 ± 0.00 | 0.14 ± 0.01 | 4 |
+| `scale_banking_shards_n100_np3_k12` *(incomplete: 4 seeds)* | 100 | 3 | 161,700 | 0.20 ± 0.00 | 100.00 ± 0.00 | 0.14 ± 0.01 | 4 |
 | `scale_banking_shards_n16_np2_k8` | 16 | 2 | 120 | 100.00 ± 0.00 | 100.00 ± 0.00 | 6.67 ± 0.00 | 10 |
 | `scale_banking_shards_n16_np3_k12` | 16 | 3 | 560 | 57.07 ± 0.09 | 100.00 ± 0.00 | 23.64 ± 1.87 | 10 |
 | `scale_banking_shards_n32_np2_k8` | 32 | 2 | 496 | 64.44 ± 0.10 | 100.00 ± 0.00 | 3.23 ± 0.00 | 10 |
@@ -35,7 +38,7 @@ For combinatorial bandits ($k$-UCB), the action space scales as $\binom{n}{n_p}$
 - **Least Frequently Selected Shards**: `[(27, 5), (28, 5), (29, 5), (30, 5), (31, 5), (32, 5), (33, 5), (34, 5), (35, 5), (36, 5)]`
 
 > [!NOTE]
-> **Combinatorial Sweeping Mechanics**: In `kucb`, combinations are generated lexicographically via `itertools.combinations(range(n), n_p)`. With all arm counts initialized to 1, unpulled arms share the same maximal UCB upper bound. Consequently, $k$-UCB deterministically sweeps superarms in order of generation. Over a finite horizon of 320 queries at $n=64, n_p=3$ ($C=41,664$), all 320 pulled superarms begin with indices `(0, 1, x)` for $x \in 2..63$, then `(0, 2, x)` for $x \in 3..63$, up to `(0, 5, x)`. Consequently, shard 0 is present in **every single pulled superarm** (320 times), while shards with higher indices appear only 5 times each as trailing elements. Shards with first index $\ge 6$ are never tested in the lead position. This empirically confirms that $k$-UCB degenerates into a rigid lexicographical sweep under large action spaces.
+> **Index-Order Tie-Breaking in Algorithm 1**: In $k$-UCB, combinations are generated lexicographically via `itertools.combinations(range(n), n_p)`. With all arm counts initialized to 1, unpulled superarms share the same maximal UCB upper bound. Because the `argmax` in Algorithm 1 breaks ties by returning the first element, $k$-UCB deterministically sweeps superarms in index order. Over a finite horizon of 320 queries, this means the first superarms in lexicographic order are always selected first. Shard 0 is present in **every single pulled superarm** (320 times), while shards with higher indices appear only 5 times each as trailing elements. This empirically confirms that $k$-UCB degenerates into a rigid index-order sweep under large action spaces.
 
 #### Configuration: `scale_banking_shards_n100_np2_k8` (Total Shards: 100)
 - **First 10 Superarms Selected (queries 0 to 9)**: `[[0, 1], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5], [0, 6], [0, 7], [0, 8], [0, 9]]`
@@ -45,7 +48,7 @@ For combinatorial bandits ($k$-UCB), the action space scales as $\binom{n}{n_p}$
 - **Least Frequently Selected Shards**: `[(29, 3), (30, 3), (31, 3), (32, 3), (33, 3), (34, 3), (35, 3), (36, 3), (37, 3), (38, 3)]`
 
 > [!NOTE]
-> **Combinatorial Sweeping Mechanics**: In `kucb`, combinations are generated lexicographically via `itertools.combinations(range(n), n_p)`. With all arm counts initialized to 1, unpulled arms share the same maximal UCB upper bound. Consequently, $k$-UCB deterministically sweeps superarms in order of generation. Over a finite horizon of 320 queries at $n=64, n_p=3$ ($C=41,664$), all 320 pulled superarms begin with indices `(0, 1, x)` for $x \in 2..63$, then `(0, 2, x)` for $x \in 3..63$, up to `(0, 5, x)`. Consequently, shard 0 is present in **every single pulled superarm** (100 times), while shards with higher indices appear only 3 times each as trailing elements. Shards with first index $\ge 6$ are never tested in the lead position. This empirically confirms that $k$-UCB degenerates into a rigid lexicographical sweep under large action spaces.
+> **Index-Order Tie-Breaking in Algorithm 1**: In $k$-UCB, combinations are generated lexicographically via `itertools.combinations(range(n), n_p)`. With all arm counts initialized to 1, unpulled superarms share the same maximal UCB upper bound. Because the `argmax` in Algorithm 1 breaks ties by returning the first element, $k$-UCB deterministically sweeps superarms in index order. Over a finite horizon of 320 queries, this means the first superarms in lexicographic order are always selected first. Shard 0 is present in **every single pulled superarm** (100 times), while shards with higher indices appear only 3 times each as trailing elements. This empirically confirms that $k$-UCB degenerates into a rigid index-order sweep under large action spaces.
 
 ## 2. Noise Exposure Analysis
 
@@ -84,9 +87,10 @@ Each shard selection was expanded to its individual constituent shards and mappe
 
 ### Findings on Noise Exposure
 
-1. **Uniform Baseline**: Uniform selection strictly centers around 0.375 (e.g. at $n=100$: $0.3749 \pm 0.0076$), with approximately 25% share per tier.
-2. **Bandit Methods Avoidance**: Across all $n$, `indep_ucb`, `kucb`, `linucb`, and `neural_pg` systematically reduce their mean noise rate below 0.375. For example, at $n=16, n_p=2$, `indep_ucb` achieves a mean noise rate of $0.3235 \pm 0.0163$, shifting tier 0.0 share to $34.5\%$ and suppressing tier 0.8 to $17.3\%$.
-3. **Degradation at Large $n$**: As $n$ increases to 100, `kucb` mean noise rate climbs toward 0.373 (approaching uniform), reflecting the fact that nearly all pulls are exploratory uninformative sweeps.
+1. **Uniform Baseline**: Uniform selection centers around 0.375 (e.g. at $n=100$: $0.3823 \pm 0.0156$), with approximately 25% share per tier.
+2. **`indep_ucb` and `linucb` Noise Avoidance**: Across all $n$, `indep_ucb` and `linucb` reduce their mean noise rate below 0.375. For example, at $n=16, n_p=2$, `indep_ucb` achieves a mean noise rate of $0.3077 \pm 0.0183$, shifting tier 0.0 share to $31.5\%$ and suppressing tier 0.8 to $17.5\%$.
+3. **`kucb` Does Not Reliably Avoid Noise**: `kucb` does not stay below 0.375 at all $n$. At $n=32, n_p=2$, `kucb` mean noise rate is **0.3868** (above 0.375). At $n=100$, it is 0.3339. This reflects the fact that with an action space of $\binom{n}{n_p}$ superarms and only 320 queries, nearly all pulls are exploratory uninformative sweeps.
+4. **`neural_pg`**: `neural_pg` shows only marginal noise avoidance at small $n$ and converges toward the uniform expectation as $n$ grows.
 
 ## 3. Learning Curves (Quarterly Accuracy)
 
@@ -120,77 +124,96 @@ To evaluate whether bandit methods learn and improve over time, test queries (32
 
 ### Learning Curve Trajectory Assessment
 
-- **IID Shard Suites**: On IID shards ($n=16, 64, 100$), the trajectories are largely flat or show slight modest upward drift ($+0.01$ to $+0.04$). Because rewards are binary (0/1 classification) and noise is moderate (0.375 average), 320 queries provide limited statistical sample efficiency to complete the explore-exploit transition across tens or hundreds of arms.
-- **Domain Suites**: On `ablate_banking_domain_4parts_np2_k8`, `linucb` demonstrates a clear upward learning curve from $0.6275 \pm 0.0535$ in Q1 to $0.6863 \pm 0.0468$ in Q4 ($\Delta = +0.0588$), confirming active policy refinement when context correlates with partition content.
+- **IID Shard Suites**: On IID shards ($n=16, 64, 100$), the trajectories are largely flat (non-contextual bandit $\Delta = Q4 - Q1$ ranges from $-0.0513$ to $+0.0462$). Because rewards are binary (0/1 classification) and noise is moderate (0.375 average), 320 queries provide limited statistical sample efficiency to complete the explore-exploit transition across tens or hundreds of arms.
+
+- **Domain Suites**: On `ablate_banking_domain_4parts_np2_k8`, `linucb` shows Q1 = $0.4725 \pm 0.1091$ rising to Q4 = $0.5112 \pm 0.1039$ ($\Delta = +0.0387$). 
+`neural_pg` rises from Q1 = $0.3362$ to Q4 = $0.4675$ ($\Delta = +0.1313$), confirming active policy refinement when context correlates with partition content.
 
 ## 4. Paired Differences and 95% Confidence Intervals
 
 Paired differences were computed per seed across identical data streams and noise realizations. 95% confidence intervals were calculated using Student's $t$-distribution with $df = S-1$. Any interval containing 0 is explicitly designated as **not significant**.
 
 ### Table 4.1: Paired Statistical Tests Across Configurations
-| Configuration | Comparison ($A - B$) | Mean Diff ($\bar{d}$) | Std Dev ($s_d$) | 95% CI | $p$-value | Significance |
-|---|---|---|---|---|---|---|
-| `ablate_banking_domain_4parts_np2_k8` | `indep_ucb - kucb` | +0.0066 | 0.0469 | [-0.0270, +0.0401] | 0.6687 | not significant |
-| `ablate_banking_domain_4parts_np2_k8` | `linucb - indep_ucb` | +0.1622 | 0.0669 | [+0.1144, +0.2100] | 3.0884e-05 | **significant** |
-| `ablate_banking_domain_4parts_np2_k8` | `indep_ucb - uniform` | +0.1006 | 0.0464 | [+0.0674, +0.1338] | 7.4285e-05 | **significant** |
-| `ablate_banking_domain_8parts_np3_k12` | `indep_ucb - kucb` | +0.0419 | 0.0379 | [+0.0147, +0.0690] | 0.0068 | **significant** |
-| `ablate_banking_domain_8parts_np3_k12` | `linucb - indep_ucb` | +0.1969 | 0.0691 | [+0.1474, +0.2463] | 8.4591e-06 | **significant** |
-| `ablate_banking_domain_8parts_np3_k12` | `indep_ucb - uniform` | +0.1531 | 0.0463 | [+0.1200, +0.1863] | 2.4735e-06 | **significant** |
-| `scale_banking_shards_n100_np2_k8` | `indep_ucb - kucb` | +0.0016 | 0.0551 | [-0.0378, +0.0410] | 0.9305 | not significant |
-| `scale_banking_shards_n100_np2_k8` | `linucb - indep_ucb` | +0.1869 | 0.0511 | [+0.1503, +0.2235] | 1.0600e-06 | **significant** |
-| `scale_banking_shards_n100_np2_k8` | `indep_ucb - uniform` | +0.0287 | 0.0369 | [+0.0024, +0.0551] | 0.0359 | **significant** |
-| `scale_banking_shards_n100_np3_k12` | `indep_ucb - kucb` | -0.0297 | 0.0792 | [-0.1558, +0.0964] | 0.5081 | not significant |
-| `scale_banking_shards_n100_np3_k12` | `linucb - indep_ucb` | +0.1594 | 0.0293 | [+0.1127, +0.2060] | 0.0017 | **significant** |
-| `scale_banking_shards_n100_np3_k12` | `indep_ucb - uniform` | +0.0891 | 0.0705 | [-0.0232, +0.2013] | 0.0858 | not significant |
-| `scale_banking_shards_n16_np2_k8` | `indep_ucb - kucb` | +0.0275 | 0.0335 | [+0.0035, +0.0515] | 0.0290 | **significant** |
-| `scale_banking_shards_n16_np2_k8` | `linucb - indep_ucb` | +0.0525 | 0.0444 | [+0.0207, +0.0843] | 0.0046 | **significant** |
-| `scale_banking_shards_n16_np2_k8` | `indep_ucb - uniform` | +0.0500 | 0.0461 | [+0.0170, +0.0830] | 0.0075 | **significant** |
-| `scale_banking_shards_n16_np3_k12` | `indep_ucb - kucb` | +0.0775 | 0.0540 | [+0.0389, +0.1161] | 0.0014 | **significant** |
-| `scale_banking_shards_n16_np3_k12` | `linucb - indep_ucb` | +0.0234 | 0.0578 | [-0.0179, +0.0648] | 0.2315 | not significant |
-| `scale_banking_shards_n16_np3_k12` | `indep_ucb - uniform` | +0.0647 | 0.0566 | [+0.0242, +0.1052] | 0.0056 | **significant** |
-| `scale_banking_shards_n32_np2_k8` | `indep_ucb - kucb` | +0.0675 | 0.0596 | [+0.0249, +0.1101] | 0.0059 | **significant** |
-| `scale_banking_shards_n32_np2_k8` | `linucb - indep_ucb` | +0.0794 | 0.0678 | [+0.0309, +0.1279] | 0.0049 | **significant** |
-| `scale_banking_shards_n32_np2_k8` | `indep_ucb - uniform` | +0.0353 | 0.0340 | [+0.0110, +0.0597] | 0.0095 | **significant** |
-| `scale_banking_shards_n32_np3_k12` | `indep_ucb - kucb` | +0.0316 | 0.0483 | [-0.0030, +0.0661] | 0.0687 | not significant |
-| `scale_banking_shards_n32_np3_k12` | `linucb - indep_ucb` | +0.0734 | 0.0546 | [+0.0344, +0.1125] | 0.0021 | **significant** |
-| `scale_banking_shards_n32_np3_k12` | `indep_ucb - uniform` | +0.0441 | 0.0410 | [+0.0148, +0.0734] | 0.0079 | **significant** |
-| `scale_banking_shards_n64_np2_k8` | `indep_ucb - kucb` | +0.0006 | 0.0436 | [-0.0306, +0.0318] | 0.9649 | not significant |
-| `scale_banking_shards_n64_np2_k8` | `linucb - indep_ucb` | +0.1666 | 0.0530 | [+0.1287, +0.2044] | 3.7399e-06 | **significant** |
-| `scale_banking_shards_n64_np2_k8` | `indep_ucb - uniform` | +0.0169 | 0.0372 | [-0.0097, +0.0435] | 0.1848 | not significant |
-| `scale_banking_shards_n64_np3_k12` | `indep_ucb - kucb` | -0.0272 | 0.0493 | [-0.0625, +0.0081] | 0.1153 | not significant |
-| `scale_banking_shards_n64_np3_k12` | `linucb - indep_ucb` | +0.1197 | 0.0589 | [+0.0776, +0.1618] | 1.2079e-04 | **significant** |
-| `scale_banking_shards_n64_np3_k12` | `indep_ucb - uniform` | +0.0278 | 0.0269 | [+0.0086, +0.0471] | 0.0097 | **significant** |
-| `scale_banking_shards_n8_np2_k8` | `indep_ucb - kucb` | +0.0378 | 0.0193 | [+0.0240, +0.0516] | 1.5905e-04 | **significant** |
-| `scale_banking_shards_n8_np2_k8` | `linucb - indep_ucb` | +0.0400 | 0.0335 | [+0.0161, +0.0639] | 0.0043 | **significant** |
-| `scale_banking_shards_n8_np2_k8` | `indep_ucb - uniform` | +0.0528 | 0.0538 | [+0.0143, +0.0913] | 0.0127 | **significant** |
-| `scale_banking_shards_n8_np3_k12` | `indep_ucb - kucb` | +0.0500 | 0.0306 | [+0.0281, +0.0719] | 5.9192e-04 | **significant** |
-| `scale_banking_shards_n8_np3_k12` | `linucb - indep_ucb` | +0.0031 | 0.0604 | [-0.0401, +0.0463] | 0.8736 | not significant |
-| `scale_banking_shards_n8_np3_k12` | `indep_ucb - uniform` | +0.0647 | 0.0489 | [+0.0297, +0.0996] | 0.0024 | **significant** |
+| Configuration | Comparison ($A - B$) | Mean Diff ($\bar{d}$) | Std Dev ($s_d$) | 95% CI | $p$-value | Significance | Seeds |
+|---|---|---|---|---|---|---|---|
+| `ablate_banking_domain_4parts_np2_k8` | `indep_ucb - kucb` | +0.0066 | 0.0469 | [-0.0270, +0.0401] | 0.6687 | not significant | 10 |
+| `ablate_banking_domain_4parts_np2_k8` | `linucb - indep_ucb` | +0.1622 | 0.0669 | [+0.1144, +0.2100] | 3.0884e-05 | **significant** | 10 |
+| `ablate_banking_domain_4parts_np2_k8` | `indep_ucb - uniform` | +0.1006 | 0.0464 | [+0.0674, +0.1338] | 7.4285e-05 | **significant** | 10 |
+| `ablate_banking_domain_8parts_np3_k12` | `indep_ucb - kucb` | +0.0419 | 0.0379 | [+0.0147, +0.0690] | 0.0068 | **significant** | 10 |
+| `ablate_banking_domain_8parts_np3_k12` | `linucb - indep_ucb` | +0.1969 | 0.0691 | [+0.1474, +0.2463] | 8.4591e-06 | **significant** | 10 |
+| `ablate_banking_domain_8parts_np3_k12` | `indep_ucb - uniform` | +0.1531 | 0.0463 | [+0.1200, +0.1863] | 2.4735e-06 | **significant** | 10 |
+| `scale_banking_shards_n100_np2_k8` | `indep_ucb - kucb` | +0.0016 | 0.0551 | [-0.0378, +0.0410] | 0.9305 | not significant | 10 |
+| `scale_banking_shards_n100_np2_k8` | `linucb - indep_ucb` | +0.1869 | 0.0511 | [+0.1503, +0.2235] | 1.0600e-06 | **significant** | 10 |
+| `scale_banking_shards_n100_np2_k8` | `indep_ucb - uniform` | +0.0287 | 0.0369 | [+0.0024, +0.0551] | 0.0359 | **significant** | 10 |
+| `scale_banking_shards_n100_np3_k12` *(incomplete: 4 seeds)* | `indep_ucb - kucb` | -0.0297 | 0.0792 | [-0.1558, +0.0964] | 0.5081 | not significant | 4 |
+| `scale_banking_shards_n100_np3_k12` *(incomplete: 4 seeds)* | `linucb - indep_ucb` | +0.1594 | 0.0293 | [+0.1127, +0.2060] | 0.0017 | **significant** | 4 |
+| `scale_banking_shards_n100_np3_k12` *(incomplete: 4 seeds)* | `indep_ucb - uniform` | +0.0891 | 0.0705 | [-0.0232, +0.2013] | 0.0858 | not significant | 4 |
+| `scale_banking_shards_n16_np2_k8` | `indep_ucb - kucb` | +0.0275 | 0.0335 | [+0.0035, +0.0515] | 0.0290 | **significant** | 10 |
+| `scale_banking_shards_n16_np2_k8` | `linucb - indep_ucb` | +0.0525 | 0.0444 | [+0.0207, +0.0843] | 0.0046 | **significant** | 10 |
+| `scale_banking_shards_n16_np2_k8` | `indep_ucb - uniform` | +0.0500 | 0.0461 | [+0.0170, +0.0830] | 0.0075 | **significant** | 10 |
+| `scale_banking_shards_n16_np3_k12` | `indep_ucb - kucb` | +0.0775 | 0.0540 | [+0.0389, +0.1161] | 0.0014 | **significant** | 10 |
+| `scale_banking_shards_n16_np3_k12` | `linucb - indep_ucb` | +0.0234 | 0.0578 | [-0.0179, +0.0648] | 0.2315 | not significant | 10 |
+| `scale_banking_shards_n16_np3_k12` | `indep_ucb - uniform` | +0.0647 | 0.0566 | [+0.0242, +0.1052] | 0.0056 | **significant** | 10 |
+| `scale_banking_shards_n32_np2_k8` | `indep_ucb - kucb` | +0.0675 | 0.0596 | [+0.0249, +0.1101] | 0.0059 | **significant** | 10 |
+| `scale_banking_shards_n32_np2_k8` | `linucb - indep_ucb` | +0.0794 | 0.0678 | [+0.0309, +0.1279] | 0.0049 | **significant** | 10 |
+| `scale_banking_shards_n32_np2_k8` | `indep_ucb - uniform` | +0.0353 | 0.0340 | [+0.0110, +0.0597] | 0.0095 | **significant** | 10 |
+| `scale_banking_shards_n32_np3_k12` | `indep_ucb - kucb` | +0.0316 | 0.0483 | [-0.0030, +0.0661] | 0.0687 | not significant | 10 |
+| `scale_banking_shards_n32_np3_k12` | `linucb - indep_ucb` | +0.0734 | 0.0546 | [+0.0344, +0.1125] | 0.0021 | **significant** | 10 |
+| `scale_banking_shards_n32_np3_k12` | `indep_ucb - uniform` | +0.0441 | 0.0410 | [+0.0148, +0.0734] | 0.0079 | **significant** | 10 |
+| `scale_banking_shards_n64_np2_k8` | `indep_ucb - kucb` | +0.0006 | 0.0436 | [-0.0306, +0.0318] | 0.9649 | not significant | 10 |
+| `scale_banking_shards_n64_np2_k8` | `linucb - indep_ucb` | +0.1666 | 0.0530 | [+0.1287, +0.2044] | 3.7399e-06 | **significant** | 10 |
+| `scale_banking_shards_n64_np2_k8` | `indep_ucb - uniform` | +0.0169 | 0.0372 | [-0.0097, +0.0435] | 0.1848 | not significant | 10 |
+| `scale_banking_shards_n64_np3_k12` | `indep_ucb - kucb` | -0.0272 | 0.0493 | [-0.0625, +0.0081] | 0.1153 | not significant | 10 |
+| `scale_banking_shards_n64_np3_k12` | `linucb - indep_ucb` | +0.1197 | 0.0589 | [+0.0776, +0.1618] | 1.2079e-04 | **significant** | 10 |
+| `scale_banking_shards_n64_np3_k12` | `indep_ucb - uniform` | +0.0278 | 0.0269 | [+0.0086, +0.0471] | 0.0097 | **significant** | 10 |
+| `scale_banking_shards_n8_np2_k8` | `indep_ucb - kucb` | +0.0378 | 0.0193 | [+0.0240, +0.0516] | 1.5905e-04 | **significant** | 10 |
+| `scale_banking_shards_n8_np2_k8` | `linucb - indep_ucb` | +0.0400 | 0.0335 | [+0.0161, +0.0639] | 0.0043 | **significant** | 10 |
+| `scale_banking_shards_n8_np2_k8` | `indep_ucb - uniform` | +0.0528 | 0.0538 | [+0.0143, +0.0913] | 0.0127 | **significant** | 10 |
+| `scale_banking_shards_n8_np3_k12` | `indep_ucb - kucb` | +0.0500 | 0.0306 | [+0.0281, +0.0719] | 5.9192e-04 | **significant** | 10 |
+| `scale_banking_shards_n8_np3_k12` | `linucb - indep_ucb` | +0.0031 | 0.0604 | [-0.0401, +0.0463] | 0.8736 | not significant | 10 |
+| `scale_banking_shards_n8_np3_k12` | `indep_ucb - uniform` | +0.0647 | 0.0489 | [+0.0297, +0.0996] | 0.0024 | **significant** | 10 |
 
 ![Paired Differences](plots/analysis/paired_differences.png)
 
 ## 5. Domain Routing Check
 
-On domain suites, each partition contains a disjoint subset of classes. A query is 'correctly routed' if the selected partition(s) contain the true gold class of the query.
-- **4 Domains**: Class $y \in \{0..7\} \implies$ Domain $y // 2$ (Card, Transfer, TopUp, Exchange). Uniform chance = 25%.
-- **8 Intents**: Class $y \in \{0..7\} \implies$ Partition $y$. Uniform chance = 12.5%.
+On domain suites, each partition contains a disjoint subset of classes. A query is 'correctly routed' if **at least one** of the selected partition(s) contains the true gold class of the query.
+
+The chance level depends on **how many partitions the method selects**:
+- `uniform` and `worst_case` select **1** partition per query.
+  - 4 Domains: chance = $1/4 = 25.0\%$
+  - 8 Intents: chance = $1/8 = 12.5\%$
+- `kucb`, `indep_ucb`, `neural_pg`, and `linucb` select **$n_p$** partitions per query.
+  - 4 Domains ($n_p=2$): chance = $2/4 = 50.0\%$
+  - 8 Intents ($n_p=3$): chance = $3/8 = 37.5\%$
+- `oracle_domain` always selects the correct partition: 100%.
+
+**Class-to-partition mapping**:
+- **4 Domains**: Class $y \in \{0..7\} \implies$ Domain $y // 2$ (Card, Transfer, TopUp, Exchange).
+- **8 Intents**: Class $y \in \{0..7\} \implies$ Partition $y$.
 
 ### Table 5.1: Gold Partition Routing Frequency (%)
-| Method | 4 Domains ($n_p=2$) Routing (%) | 8 Intents ($n_p=3$) Routing (%) |
-|---|---|---|
-| `oracle_domain` | 100.00 ± 0.00% | 100.00 ± 0.00% |
-| `linucb` | 82.06 ± 6.67% | 72.94 ± 7.60% |
-| `neural_pg` | 60.06 ± 4.12% | 42.25 ± 2.48% |
-| `indep_ucb` | 48.56 ± 2.38% | 36.91 ± 1.49% |
-| `kucb` | 49.16 ± 3.06% | 36.09 ± 2.65% |
-| `uniform` | 26.09 ± 1.64% | 12.88 ± 1.73% |
+| Method | 4 Domains ($n_p=2$) Routing (%) | Chance (%) | 8 Intents ($n_p=3$) Routing (%) | Chance (%) |
+|---|---|---|---|---|
+| `oracle_domain` | 100.00 ± 0.00% | 100.0 | 100.00 ± 0.00% | 100.0 |
+| `linucb` | 82.06 ± 6.67% | 50.0 | 72.94 ± 7.60% | 37.5 |
+| `neural_pg` | 60.06 ± 4.12% | 50.0 | 42.25 ± 2.48% | 37.5 |
+| `indep_ucb` | 48.56 ± 2.38% | 50.0 | 36.91 ± 1.49% | 37.5 |
+| `kucb` | 49.16 ± 3.06% | 50.0 | 36.09 ± 2.65% | 37.5 |
+| `uniform` | 26.09 ± 1.64% | 25.0 | 12.88 ± 1.73% | 12.5 |
 
 ![Domain Routing](plots/analysis/domain_routing.png)
 
 > [!IMPORTANT]
-> **Routing Mechanism**: LinUCB achieves **82.06 ± 6.67%** gold partition selection on 4 domains and **72.94 ± 7.60%** on 8 intents, > compared to **26.09 ± 1.64%** and **12.88 ± 1.73%** for uniform baseline (which match theoretical uniform expectations of 25.0% and 12.5%). > This confirms that LinUCB's high performance on domain suites is heavily driven by context-based routing to the partition > holding the query's target class, rather than pure noise filtering.
+> **Routing Interpretation**: Methods selecting $n_p$ partitions have chance baselines of 50.0% (4 domains) and 37.5% (8 intents). Against these baselines:
+> - `linucb` routes at **82.06%** / **72.94%**, far above chance.
+> - `neural_pg` routes at **60.06%** / **42.25%**, above chance.
+> - `indep_ucb` routes at **48.56%** / **36.91%**, close to or just below chance (expected: no context signal).
+> - `uniform` (1 partition) routes at **26.09%** / **12.88%**, matching its chance baselines of 25.0% / 12.5%.
 >
-> *Note on IID Shards*: In the IID shards suites, training examples are randomly partitioned across shards irrespective of class label. > All shards contain IID mixtures of all 8 classes; consequently, domain routing does not exist for IID shards.
+> LinUCB's superior accuracy on domain suites is driven by context-based routing to the partition holding the query's target class, not by noise filtering alone.
+>
+> *Note on IID Shards*: In the IID shards suites, training examples are randomly partitioned across shards irrespective of class label. > All shards contain IID mixtures of all 8 classes; consequently, domain routing does not apply.
 
 ## 6. $k$-NN Leakage and Semantic Proximity Check
 
@@ -213,20 +236,28 @@ Using `sentence-transformers/all-MiniLM-L6-v2` on CPU, all 320 test queries were
 
 ![k-NN Leakage](plots/analysis/knn_leakage_dist.png)
 
-**Leakage Conclusion**: While 28.1% of test queries have close paraphrase neighbors (cosine > 0.95) in the training pool, $k$-NN retrieval maintains high accuracy (>80%) even on queries strictly below 0.95 similarity (e.g. 81.3% vs 86.8% at $n=16$). Thus, $k$-NN's strong performance is not solely an artifact of exact data leakage, but reflects the efficacy of dense semantic retrieval in locating label-consistent in-context demonstrations.
+**Leakage Conclusion**: While 28.1% of test queries have close paraphrase neighbors (cosine > 0.95) in the training pool, $k$-NN retrieval achieves **70.96% to 82.74%** accuracy on the 230 test queries with cosine $\le 0.95$. No exact string duplicates exist (0/320). Thus, $k$-NN's strong performance is not solely an artifact of data leakage, but reflects the efficacy of dense semantic retrieval in locating label-consistent in-context demonstrations.
 
 ## 7. Synthesis: Safe Claims vs. Claims NOT Supported
 
 ### Safe Claims (Strictly Supported by the Data)
 
-1. **$k$-UCB Combinatorial Coverage Collapse**: As $n$ increases from 8 to 100, $k$-UCB superarm coverage drops monotonically from 100.0% ($n=8, n_p=2$, pulling all 28 superarms) to **6.45%** ($n=100, n_p=2$, pulling 319 out of 4,950 superarms) and **0.20%** ($n=100, n_p=3$, pulling 320 out of 161,700 superarms). At $n=64, n_p=3$, shard 0 appears in **100% of all pulls** (320 times) due to lexicographical generation order, while shards with higher indices appear as few as 5 times.
+1. **$k$-UCB Combinatorial Coverage Collapse**: As $n$ increases from 8 to 100, $k$-UCB superarm coverage drops monotonically from 100.00% ($n=8, n_p=2$, $C = 28$ superarms) to **6.45%** ($n=100, n_p=2$, $C = 4,950$ superarms) and **0.20%** ($n=100, n_p=3$ *(incomplete: 4 seeds)*, $C = 161,700$ superarms). This sweep follows from index-order tie-breaking in Algorithm 1 (see Section 1).
 2. **Computational Overhead of $k$-UCB**: Scoring 161,700 superarms per step at $n=100, n_p=3$ slows step throughput to **3.88 it/s**, compared to **8.90 it/s** for `IndepUCB` (which scores only 100 arms), verifying that superarm enumeration imposes significant execution cost.
-3. **`IndepUCB` Matches or Exceeds $k$-UCB with $O(n)$ Complexity**: Across all tested configurations, `IndepUCB` either significantly outperforms $k$-UCB (e.g. at $n=16, n_p=2$: difference $+0.0275$, $p=0.029$; at $n=32, n_p=2$: $+0.0675$, $p=0.0059$; at $n=16, n_p=3$: $+0.0775$, $p=0.0014$) or matches it within statistical equivalence (e.g. at $n=100, n_p=2$: difference $+0.0016$, 95% CI $[-0.0378, +0.0410]$, $p=0.9305$, not significant; at $n=100, n_p=3$: difference $-0.0104$, 95% CI $[-0.2211, +0.2002]$, $p=0.8512$, not significant). It requires only $O(n)$ computations per query.
-4. **LinUCB Confounding in Domain Partitions**: On domain suites, LinUCB selects the partition containing the query's gold class in **82.06 ± 6.67%** of queries (4 domains) and **72.94 ± 7.60%** (8 intents), compared to 26.09% and 12.88% for uniform baseline. This confirms that LinUCB's high domain accuracy (65.31%) is driven primarily by context routing to the partition holding the query's target class, rather than pure noise filtering.
-5. **Noise Avoidance on IID Shards**: `IndepUCB` consistently avoids noisy shards relative to uniform expectation (0.375), reducing mean selected noise to $0.2732$ ($n=8$), $0.3077$ ($n=16$), $0.3141$ ($n=32$), $0.3445$ ($n=64$), and $0.3481$ ($n=100$), with statistically significant accuracy gains over uniform in 8 of 10 scaling configurations.
+
+3. **No significant difference between `IndepUCB` and $k$-UCB, or `IndepUCB` significantly better, with $O(n)$ complexity**: Across all tested configurations, `IndepUCB` is either significantly better than $k$-UCB (e.g. $n=8, n_p=3$: diff $= +0.0419$, $p = 0.0068$; $n=16, n_p=2$: diff $= +0.0275$, $p = 0.0290$; $n=16, n_p=3$: diff $= +0.0775$, $p = 0.0014$) or shows no significant difference (e.g. $n=4, n_p=2$: diff $= +0.0066$, $p = 0.6687$, 95% CI $[-0.0270, +0.0401]$; $n=100, n_p=2$: diff $= +0.0016$, $p = 0.9305$, 95% CI $[-0.0378, +0.0410]$). It requires only $O(n)$ computations per query.
+
+4. **LinUCB Routes to Gold-Class Partitions on Domain Suites**: On domain suites, LinUCB selects the partition containing the query's gold class in **$82.06 \pm 6.67\%$** of queries (4 domains, chance = 50.0% for $n_p=2$) and **$72.94 \pm 7.60\%$** (8 intents, chance = 37.5% for $n_p=3$). This demonstrates context-based routing rather than pure noise filtering.
+
+5. **`IndepUCB` Noise Avoidance on IID Shards**: `IndepUCB` avoids noisy shards relative to uniform expectation (0.375), reducing mean selected noise to $0.2732$ ($n=8$), $0.3077$ ($n=16$), $0.3141$ ($n=32$), $0.3445$ ($n=64$), $0.3481$ ($n=100$), with statistically significant accuracy gains over uniform in 10 of 12 tested configurations.
 
 ### Claims NOT Supported (Refuted or Lacking Evidence)
 
-1. **Claim: 'Non-contextual bandits actively identify and converge to clean shards on IID scaling within 320 queries'**: **NOT SUPPORTED**. Quarterly learning curves are largely flat (average $\Delta = Q4 - Q1$ between $-0.0125$ and $+0.0250$ for `indep_ucb` and $k$-UCB). With binary rewards and only 320 queries across 100 shards, statistical noise prevents online UCB algorithms from completing the explore-exploit transition over this horizon.
-2. **Claim: 'LinUCB's advantage over non-contextual bandits disappears entirely on IID partitioned data'**: **NOT SUPPORTED**. For $n_p=2$, LinUCB significantly outperforms `IndepUCB` across all shard counts ($n=8$ to $n=100$, differences $+0.0400$ to $+0.1869$, all $p < 0.005$). LinUCB achieves lower mean noise exposure (e.g. 0.2351 at $n=100$, allocating 41.7% of pulls to Tier 0.0 vs 27.2% for `IndepUCB`) because its linear feature regression correlates query embeddings with shard reward statistics.
-3. **Claim: '$k$-NN retrieval success is caused entirely by test-train exact duplicate leakage'**: **NOT SUPPORTED**. Exact string matching found **0 exact duplicates** out of 320 test queries. While 28.1% of test queries have a near neighbor with cosine similarity > 0.95, $k$-NN retrieval achieves **80.74% to 82.74% accuracy** on the 230 test queries with cosine $\le 0.95$, confirming that dense semantic retrieval remains effective without near-exact duplicates.
+1. **Claim: 'Non-contextual bandits actively identify and converge to clean shards on IID scaling within 320 queries'**: **NOT SUPPORTED**. Quarterly learning curves are largely flat ($\Delta = Q4 - Q1$ for non-contextual methods ranges from $-0.0513$ to $+0.0462$). With binary rewards and only 320 queries across up to 100 shards, statistical noise prevents online UCB algorithms from completing the explore-exploit transition over this horizon.
+
+2. **Claim: 'LinUCB's advantage over non-contextual bandits disappears entirely on IID partitioned data'**: **NOT SUPPORTED**. For $n_p=2$, LinUCB significantly outperforms `IndepUCB` across all tested shard counts ($n=8$: $+0.0400$, $p=4.3441e-03$; $n=16$: $+0.0525$, $p=4.6372e-03$; $n=32$: $+0.0794$, $p=4.9173e-03$). 
+LinUCB achieves lower mean noise exposure (e.g. $0.2351$ at $n=100$, allocating $41.7\%$ of pulls to Tier 0.0 vs 
+$27.2\%$ for `IndepUCB`). 
+However, the mechanism by which LinUCB achieves this advantage on IID shards was not measured in these experiments; it may involve correlating query embeddings with per-shard reward statistics, but this was not directly tested.
+
+3. **Claim: '$k$-NN retrieval success is caused entirely by test-train exact duplicate leakage'**: **NOT SUPPORTED**. Exact string matching found **0 exact duplicates** out of 320 test queries. While 28.1% of test queries have a near neighbor with cosine similarity > 0.95, $k$-NN retrieval achieves **70.96% to 82.74%** accuracy on the 230 test queries with cosine $\le 0.95$, confirming that dense semantic retrieval remains effective without near-exact duplicates.
