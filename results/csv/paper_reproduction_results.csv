@@ -1,0 +1,7 @@
+model,dataset,worst_case_mean,worst_case_std,uniform_mean,uniform_std,kucb_mean,kucb_std,no_noise_mean,no_noise_std
+Qwen2.5-7B,AG-News,80.33,4.06,79.75,5.88,80.5,4.83,81.33,2.7
+Qwen2.5-7B,Ecommerce,77.67,10.11,78.25,4.42,81.42,2.63,83.75,2.18
+Qwen2.5-7B,Synthetic,95.17,2.4,99.0,0.9,99.33,0.52,100.0,0.0
+Qwen2.5-14B,AG-News,84.58,4.19,84.92,3.38,85.75,5.02,86.83,4.13
+Qwen2.5-14B,Ecommerce,84.33,5.2,86.92,2.13,87.5,1.89,89.0,2.05
+Qwen2.5-14B,Synthetic,84.58,6.35,92.33,5.71,95.83,4.4,100.0,0.0
