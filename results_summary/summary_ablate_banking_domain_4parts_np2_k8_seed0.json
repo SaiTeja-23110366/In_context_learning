@@ -1,0 +1,315 @@
+{
+  "seed": 0,
+  "label_names": [
+    "Class_1",
+    "Class_2",
+    "Class_3",
+    "Class_4",
+    "Class_5",
+    "Class_6",
+    "Class_7",
+    "Class_8"
+  ],
+  "dataset": "banking",
+  "partition_mode": "domain",
+  "noise_mode": "random",
+  "noise_rates": [
+    0.5096,
+    0.2158,
+    0.0328,
+    0.0
+  ],
+  "k": 8,
+  "replay_test": 1,
+  "partition_sizes": [
+    265,
+    329,
+    272,
+    238
+  ],
+  "no_noise": {
+    "accuracy": 0.653125,
+    "pred_counts": {
+      "4": 51,
+      "0": 39,
+      "3": 46,
+      "7": 35,
+      "5": 31,
+      "1": 31,
+      "2": 40,
+      "6": 47
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "wall_clock_seconds": 80.22,
+    "peak_cpu_mb": 0.88,
+    "peak_gpu_mb": 14608.9,
+    "n_arms": 1
+  },
+  "worst_case": {
+    "accuracy": 0.221875,
+    "pred_counts": {
+      "0": 52,
+      "7": 102,
+      "6": 24,
+      "5": 15,
+      "2": 34,
+      "1": 56,
+      "4": 17,
+      "3": 20
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "wall_clock_seconds": 77.87,
+    "peak_cpu_mb": 0.26,
+    "peak_gpu_mb": 14593.62,
+    "n_arms": 1
+  },
+  "uniform": {
+    "accuracy": 0.278125,
+    "pred_counts": {
+      "7": 116,
+      "1": 20,
+      "5": 37,
+      "0": 19,
+      "4": 50,
+      "6": 33,
+      "3": 17,
+      "2": 28
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "wall_clock_seconds": 78.66,
+    "peak_cpu_mb": 0.24,
+    "peak_gpu_mb": 14616.81,
+    "n_arms": 4
+  },
+  "kucb": {
+    "accuracy": 0.44375,
+    "pred_counts": {
+      "3": 42,
+      "0": 22,
+      "7": 73,
+      "4": 63,
+      "5": 25,
+      "1": 18,
+      "2": 31,
+      "6": 46
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "superarms": [
+      [
+        0,
+        1
+      ],
+      [
+        0,
+        2
+      ],
+      [
+        0,
+        3
+      ],
+      [
+        1,
+        2
+      ],
+      [
+        1,
+        3
+      ],
+      [
+        2,
+        3
+      ]
+    ],
+    "arm_counts": [
+      40,
+      37,
+      54,
+      66,
+      74,
+      55
+    ],
+    "arm_means": [
+      0.325,
+      0.2972972972972973,
+      0.42592592592592593,
+      0.48484848484848475,
+      0.527027027027027,
+      0.43636363636363634
+    ],
+    "wall_clock_seconds": 78.37,
+    "peak_cpu_mb": 0.33,
+    "peak_gpu_mb": 14609.21,
+    "n_arms": 6
+  },
+  "linucb": {
+    "accuracy": 0.653125,
+    "pred_counts": {
+      "2": 42,
+      "4": 52,
+      "3": 40,
+      "1": 24,
+      "5": 42,
+      "0": 22,
+      "7": 58,
+      "6": 40
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "arm_counts": [
+      167,
+      167,
+      153,
+      153
+    ],
+    "arm_rewards": [
+      94.0,
+      94.0,
+      115.0,
+      115.0
+    ],
+    "wall_clock_seconds": 196.34,
+    "peak_cpu_mb": 3.95,
+    "peak_gpu_mb": 14616.81,
+    "n_arms": 4
+  },
+  "neural_pg": {
+    "accuracy": 0.534375,
+    "pred_counts": {
+      "5": 37,
+      "7": 70,
+      "4": 68,
+      "1": 19,
+      "0": 20,
+      "2": 40,
+      "3": 31,
+      "6": 35
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "arm_counts": [
+      133,
+      178,
+      203,
+      126
+    ],
+    "arm_rewards": [
+      55.0,
+      100.0,
+      122.0,
+      65.0
+    ],
+    "wall_clock_seconds": 97.76,
+    "peak_cpu_mb": 0.73,
+    "peak_gpu_mb": 14608.44,
+    "n_arms": 4
+  },
+  "indep_ucb": {
+    "accuracy": 0.390625,
+    "pred_counts": {
+      "7": 61,
+      "4": 88,
+      "3": 32,
+      "5": 57,
+      "2": 14,
+      "6": 39,
+      "1": 14,
+      "0": 15
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "arm_counts": [
+      127,
+      127,
+      195,
+      195
+    ],
+    "arm_means": [
+      0.3385826771653544,
+      0.3385826771653544,
+      0.4205128205128205,
+      0.4205128205128205
+    ],
+    "wall_clock_seconds": 74.27,
+    "peak_cpu_mb": 0.26,
+    "peak_gpu_mb": 14607.2,
+    "n_arms": 4
+  },
+  "knn_retrieval": {
+    "accuracy": 0.890625,
+    "pred_counts": {
+      "5": 44,
+      "3": 40,
+      "7": 52,
+      "0": 30,
+      "2": 41,
+      "6": 43,
+      "4": 47,
+      "1": 23
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "wall_clock_seconds": 87.54,
+    "peak_cpu_mb": 3.95,
+    "peak_gpu_mb": 14653.01,
+    "n_arms": 0
+  },
+  "oracle_domain": {
+    "accuracy": 0.828125,
+    "pred_counts": {
+      "5": 40,
+      "0": 24,
+      "3": 42,
+      "7": 49,
+      "1": 33,
+      "2": 41,
+      "6": 44,
+      "4": 47
+    },
+    "partition_sizes": [
+      265,
+      329,
+      272,
+      238
+    ],
+    "wall_clock_seconds": 76.43,
+    "peak_cpu_mb": 0.24,
+    "peak_gpu_mb": 14616.48,
+    "n_arms": 4
+  }
+}

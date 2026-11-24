@@ -1,6 +1,10 @@
 run_name: mid
 method: ucb
 n_partitions: 4
+
+
+noise_mode: random
+max_noise: 0.8
 noise_rates: [0.0, 0.0, 0.5, 1.0]
 k: 8
 n_test: 400

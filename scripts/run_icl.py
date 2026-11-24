@@ -26,21 +26,30 @@ from src.data_utils import (
 from src.icl import load_model, predict
 
 
-def build_partitions(train, cfg):
+from src.noise_module import LabelNoiseInjector
+
+def build_partitions(train, cfg, label_names):
     mode = cfg.get("partition_mode", "iid")
     kwargs = dict(
         train=train,
         n_partitions=cfg["n_partitions"],
-        noise_rates=cfg["noise_rates"],
         seed=cfg["seed"],
     )
     if mode == "iid":
-        return make_iid_partitions(**kwargs)
-    if mode == "non_iid":
-        return make_non_iid_partitions(
+        parts = make_iid_partitions(**kwargs)
+    elif mode == "non_iid":
+        parts = make_non_iid_partitions(
             **kwargs, dirichlet_alpha=float(cfg.get("dirichlet_alpha", 0.3))
         )
-    raise ValueError(mode)
+    else:
+        raise ValueError(mode)
+    
+    injector = LabelNoiseInjector(
+        noise_rates=cfg["noise_rates"],
+        n_classes=len(label_names),
+        seed=cfg["seed"]
+    )
+    return injector.inject(parts)
 
 
 def run_method(name, partitions, test, cfg, tok, model, rng, label_names):
@@ -127,7 +136,7 @@ def main():
             cfg.get("dataset", "ag_news"), cfg["hf_cache"], seed=cfg["seed"]
         )
         test = subsample_test(test, cfg["n_test"], cfg["seed"])
-        partitions = build_partitions(train, cfg)
+        partitions = build_partitions(train, cfg, label_names)
         summary = {
             "seed": cfg["seed"],
             "label_names": label_names,

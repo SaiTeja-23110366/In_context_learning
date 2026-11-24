@@ -11,9 +11,12 @@ def load_model(model_path: str):
     model = AutoModelForCausalLM.from_pretrained(
         model_path,
         torch_dtype=torch.bfloat16,
-        device_map="auto",          # distributes across all available GPUs
+        device_map={"": 0},         # Force onto a single GPU to prevent PCIe communication overhead
+        attn_implementation="sdpa"  # Use PyTorch's optimized Scaled Dot-Product Attention
     )
     model.eval()
+    # Optional: compile for faster inference (requires PyTorch 2.0+)
+    # model = torch.compile(model)
     return tok, model
 
 
@@ -51,15 +54,38 @@ def parse_label(text: str, label_names: list[str]) -> int | None:
         if text.strip()
         else ""
     )
+    clean_first = first.strip("()[]{} :")
     # Exact match (case-insensitive)
     for i, name in enumerate(label_names):
-        if first.lower() == name.lower():
+        if clean_first.lower() == name.lower():
             return i
-    # Substring match (unique)
+
+    # Single-character labels (e.g. ["A", "B", "C", "D"])
+    is_single_char = all(len(name) == 1 for name in label_names)
+    if is_single_char:
+        # Search for explicit patterns like "Answer: A", "Choice B", "Option C", or standalone letter
+        m = re.search(r"(?:answer|choice|option|class|is)?\s*[:\-\)]?\s*([A-Za-z])\b", clean_first, re.IGNORECASE)
+        if m:
+            ch = m.group(1).upper()
+            for i, name in enumerate(label_names):
+                if ch == name.upper():
+                    return i
+        m = re.search(r"(?:answer|choice|option|class|is)\s*[:\-\)]?\s*([A-Za-z])\b", text, re.IGNORECASE)
+        if m:
+            ch = m.group(1).upper()
+            for i, name in enumerate(label_names):
+                if ch == name.upper():
+                    return i
+
+    # Substring match (unique) for multi-character label names
     lowered = text.lower()
-    hits = [i for i, name in enumerate(label_names) if name.lower() in lowered]
+    hits = [
+        i for i, name in enumerate(label_names)
+        if (name.lower() in lowered if len(name) > 1 else bool(re.search(rf"\b{re.escape(name.lower())}\b", lowered)))
+    ]
     if len(hits) == 1:
         return hits[0]
+
     # Numeric fallback
     m = re.search(r"\b([0-9]+)\b", text)
     if m:

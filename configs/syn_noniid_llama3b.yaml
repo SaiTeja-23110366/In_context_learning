@@ -11,6 +11,10 @@ model_path: /data/pulakurthi.manohar/hf_home/Llama-3.2-3B-Instruct
 n_p: 2
 n_partitions: 4
 n_test: 400
+
+
+noise_mode: random
+max_noise: 0.8
 noise_rates:
 - 0.0
 - 0.2

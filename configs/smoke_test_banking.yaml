@@ -1,0 +1,35 @@
+dataset: banking
+hf_cache: /data/pulakurthi.manohar/hf_home
+model_path: /data/pulakurthi.manohar/hf_home/Qwen2.5-7B-Instruct
+results_dir: /data/pulakurthi.manohar/results
+run_name: smoke_test_banking
+
+partition_mode: domain
+n_partitions: 4
+n_p: 2
+k: 8
+n_test: 10
+
+methods:
+  - no_noise
+  - worst_case
+  - uniform
+  - kucb
+  - linucb
+  - neural_pg
+
+noise_mode: random
+max_noise: 0.8
+noise_rates:
+  - 0.0
+  - 0.2
+  - 0.5
+  - 0.8
+
+ucb_c: 2.0
+linucb_alpha: 1.0
+pg_lr: 0.001
+
+seed: 0
+seeds:
+  - 0

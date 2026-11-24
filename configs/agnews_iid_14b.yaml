@@ -1,7 +1,7 @@
 dataset: ag_news
 hf_cache: /data/pulakurthi.manohar/hf_home
 k: 8
-max_noise: 0.8
+
 methods:
 - no_noise
 - worst_case
@@ -9,7 +9,11 @@ methods:
 model_path: /data/pulakurthi.manohar/hf_home/Qwen2.5-14B-Instruct
 n_partitions: 4
 n_test: 400
+
+
+
 noise_mode: random
+max_noise: 0.8
 noise_rates:
 - 0.0
 - 0.0
